@@ -15,10 +15,12 @@ single point price.
 
 | File | Purpose |
 |------|---------|
-| `quant.py` | Pure numerical primitives (trend, volatility, RSI, Monte Carlo, conditional probability). No I/O. |
-| `analyze.py` | Reads TradingView OHLCV JSON on stdin, prints an honest report. |
+| `quant.py` | Pure numerical primitives (trend, volatility, RSI, EMA, Monte Carlo, conditional probability, bootstrap CI). No I/O. |
+| `analyze.py` | Reads TradingView OHLCV JSON on stdin, prints an honest assessment report. |
+| `backtest.py` | Turns a candidate RULE into a validated edge — or refutes it — with costs, out-of-sample split, and independent (non-overlapping) trades. |
 | `test_quant.py` | Sanity tests for the math (RSI, Wilson CI, OLS, Theil-Sen, cones). |
 | `test_analyze.py` | Lookahead-leakage guard for the conditional builder. |
+| `test_backtest.py` | Next-open fill / no-lookahead, cost monotonicity, thin-sample, no-free-edge-on-random-walk. |
 
 ## Run
 
@@ -37,6 +39,10 @@ node src/cli/index.js ohlcv --count 300 \
 # Machine-readable
 node src/cli/index.js ohlcv --count 300 \
   | $VENV analysis/analyze.py --tf 15 --json
+
+# Backtest a rule (ema_trend | rsi_oversold | three_up)
+node src/cli/index.js ohlcv --count 300 \
+  | $VENV analysis/backtest.py --rule ema_trend --hold 8 --cost-bps 1.0
 ```
 
 ## Methods and why each was chosen
@@ -58,6 +64,26 @@ node src/cli/index.js ohlcv --count 300 \
   **binomial test** p-value. A bucket is only an *edge* when n ≥ 30 AND the CI
   clears the baseline. `thin-sample` and CI-straddles-baseline both mean **no
   edge** — the guardrail that stops a 12-sample bucket posing as a signal.
+
+## The backtest engine — how it resists the three liars
+
+`backtest.py` measures a rule the honest way (see Block 3):
+
+- **Costs** — transaction cost is subtracted per side; the report shows gross vs
+  net so you see exactly how much cost eats. Most "edges" die here.
+- **Sample** — `n < 30` is flagged `thin-sample`; the mean edge carries a
+  **bootstrap 95% CI**, and an edge whose CI includes 0 is not real.
+- **Overfit** — an in-sample / out-of-sample split; an edge that survives only
+  in-sample is overfit and refused.
+- **No lookahead** — a signal on bar `t` fills at the **open of `t+1`** and exits
+  at the open of `t+1+hold`. The rule never sees the bar it trades into.
+- **Independent trades (default)** — non-overlapping fills, so the CI and t-stat
+  are not inflated by autocorrelation. `--overlap` gives the raw
+  signal-conditional view (every signal), which overstates significance and must
+  never be read as a CI. On live gold, `ema_trend` looked like a `+13 bps` edge
+  overlapping (182 trades) but collapsed to a non-significant `thin-sample`
+  (26 independent trades, CI crossing 0) once autocorrelation was removed — the
+  overlapping view had manufactured the edge.
 
 ## The lookahead trap (why `test_analyze.py` exists)
 

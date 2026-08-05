@@ -96,6 +96,40 @@ def theilsen_slope(y: np.ndarray) -> float:
     return float(np.median(slopes))
 
 
+def ema(closes: np.ndarray, period: int) -> np.ndarray:
+    """
+    Exponential moving average, aligned to `closes` with NaN for the warm-up.
+    Seeded with the SMA of the first `period` bars (TradingView's convention),
+    then smoothed with alpha = 2/(period+1).
+    """
+    c = np.asarray(closes, dtype=float)
+    out = np.full(c.size, np.nan)
+    if c.size < period:
+        return out
+    alpha = 2.0 / (period + 1.0)
+    out[period - 1] = c[:period].mean()
+    for i in range(period, c.size):
+        out[i] = alpha * c[i] + (1.0 - alpha) * out[i - 1]
+    return out
+
+
+def bootstrap_mean_ci(x: np.ndarray, n_boot: int = 10000,
+                      alpha: float = 0.05, seed: int = 7) -> tuple:
+    """
+    Percentile bootstrap CI for the mean. Distribution-free — no normality
+    assumption on the per-trade P&L, whose tails are fat and skewed. Returns
+    (lo, hi); if the interval excludes 0 the mean edge is significant.
+    """
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        return (float("nan"), float("nan"))
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, x.size, size=(n_boot, x.size))
+    means = x[idx].mean(axis=1)
+    lo, hi = np.percentile(means, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+    return (float(lo), float(hi))
+
+
 # --------------------------------------------------------------------------- #
 # Volatility — several estimators, because close-to-close wastes OHLC and
 # assumes constant variance. Report per-bar sigma; scale downstream.
