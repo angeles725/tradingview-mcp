@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+"""
+Decision engine — composes the whole toolkit into a single stance:
+BUY / SELL / NO-TRADE, with the reason for every gate and honest sizing.
+
+SAFETY (non-negotiable, enforced by omission):
+    This module NEVER places an order. It does not import the tv CLI, does not
+    call replay_trade, and does not touch any broker. It only READS bars on
+    stdin and PRINTS a recommendation. It exists to improve the process with
+    honest feedback (paper only), per the project's demo-before-real-money rule.
+
+The default stance is NO-TRADE. A trade is proposed only when EVERY gate passes:
+    A. a statistically significant trend, an aligned regime, and VR>1 momentum;
+    B. a cost-surviving net edge for that direction (bootstrap CI clears zero);
+    C. a risk/reward from the Monte Carlo cone at or above the threshold.
+Position size comes from a fixed risk fraction over the stop distance — never
+from conviction.
+
+Usage:
+    node src/cli/index.js ohlcv --count 300 \
+      | <venv>/python analysis/decide.py --symbol XAUUSD --tf 15
+    # historical feedback (walk the bars, tally what the process would have done):
+    ... | <venv>/python analysis/decide.py --simulate
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import dataclass, field, asdict
+
+import numpy as np
+
+import quant as q
+import backtest as bt
+
+
+@dataclass
+class Config:
+    horizon: int = 16          # forward bars for the cone / trade window
+    bars_per_day: int = 96
+    r2_floor: float = 0.30     # trend significance floor
+    vr_k: int = 4              # variance-ratio lag for the momentum check
+    min_rr: float = 1.5        # minimum reward:risk
+    stop_k: float = 1.0        # stop distance in cone-sigma (horizon-scaled) units
+    risk_frac: float = 0.01    # fraction of equity risked per trade
+    equity: float = 10_000.0
+    ema_period: int = 20
+
+
+@dataclass
+class Gate:
+    name: str
+    passed: bool
+    detail: str
+
+
+@dataclass
+class Stance:
+    action: str                # BUY | SELL | NO-TRADE
+    confidence: str            # low | medium | high | none
+    reason: str                # the headline (first failing gate, or the setup)
+    entry: float | None = None
+    stop: float | None = None
+    target: float | None = None
+    rr: float | None = None
+    size_units: float | None = None
+    risk_cash: float | None = None
+    gates: list = field(default_factory=list)
+
+    def as_dict(self):
+        d = asdict(self)
+        return d
+
+
+def _no_trade(reason, gates, confidence="none"):
+    return Stance(action="NO-TRADE", confidence=confidence, reason=reason, gates=gates)
+
+
+def decide(o, h, l, c, cfg: Config, edge_override=None) -> Stance:
+    """Return a Stance. edge_override lets the historical sim skip the (slow)
+    per-bar backtest by supplying a precomputed edge decision for Gate B."""
+    gates: list = []
+    n = c.size
+    if n < max(cfg.ema_period, 30) + cfg.horizon:
+        return _no_trade("insufficient bars for a decision", gates)
+
+    ret = q.log_returns(c)
+    trend = q.ols_trend(c, cfg.r2_floor)
+    regime = str(q.classify_regime(c, window=20)[-1])
+    vr = q.variance_ratio(ret, cfg.vr_k)
+    direction = 1 if trend.slope > 0 else -1
+    want_regime = "trend-up" if direction > 0 else "trend-down"
+
+    # --- Gate A: significant, aligned, momentum-confirmed direction ----------
+    a_ok = trend.significant and regime == want_regime and (vr is not None and vr > 1.0)
+    gates.append(asdict(Gate("A_direction", a_ok,
+                      f"trend {'sig' if trend.significant else 'NOT sig'} "
+                      f"(R^2={trend.r2:.2f}), regime={regime} (want {want_regime}), "
+                      f"VR{cfg.vr_k}={vr:.2f}")))
+    if not a_ok:
+        return _no_trade("no defensible direction (Gate A)", gates)
+
+    # --- Gate B: cost-surviving net edge for this direction ------------------
+    if edge_override is None:
+        rule_sig = bt.rule_ema_trend(o, h, l, c, period=cfg.ema_period)
+        net, cost = bt.simulate(rule_sig, o, c, cfg.horizon, 1.0, direction=direction)
+        bstats = bt.compute_stats(net, cost)
+        edge_ok = bstats.verdict == "edge"
+        b_detail = (f"n={bstats.n}, exp={bstats.expectancy_bps:+.1f}bps, "
+                    f"CI=[{bstats.ci95_ret[0]*1e4:+.1f},{bstats.ci95_ret[1]*1e4:+.1f}], "
+                    f"verdict={bstats.verdict}")
+    else:
+        edge_ok, b_detail = edge_override
+    gates.append(asdict(Gate("B_edge", edge_ok, b_detail)))
+    if not edge_ok:
+        return _no_trade("no cost-surviving edge in this direction (Gate B)", gates)
+
+    # --- Gate C: risk/reward from the volatility cone ------------------------
+    sigma_bar = q.garch11_vol(ret)
+    sigma_bar = sigma_bar[0] if sigma_bar else q.ewma_vol(ret)
+    sigma_h = q.scale_sigma(sigma_bar, cfg.horizon)
+    entry = float(c[-1])
+    cone = q.mc_bootstrap(entry, ret, cfg.horizon)
+    if direction > 0:
+        stop = entry * np.exp(-cfg.stop_k * sigma_h)
+        target = cone["P75"]
+    else:
+        stop = entry * np.exp(cfg.stop_k * sigma_h)
+        target = cone["P25"]
+    risk = abs(entry - stop)
+    reward = abs(target - entry)
+    rr = reward / risk if risk > 0 else 0.0
+    c_ok = rr >= cfg.min_rr
+    gates.append(asdict(Gate("C_risk_reward", c_ok,
+                      f"entry={entry:.2f} stop={stop:.2f} target={target:.2f} "
+                      f"R:R={rr:.2f} (min {cfg.min_rr})")))
+    if not c_ok:
+        return _no_trade(f"reward:risk {rr:.2f} below {cfg.min_rr} (Gate C)", gates)
+
+    # --- All gates passed: size by fixed risk, never by conviction -----------
+    risk_cash = cfg.risk_frac * cfg.equity
+    size = risk_cash / risk if risk > 0 else 0.0
+    confidence = "high" if (trend.r2 > 0.5 and vr > 1.1) else "medium"
+    action = "BUY" if direction > 0 else "SELL"
+    return Stance(action=action, confidence=confidence,
+                  reason=f"{action}: all gates passed ({regime}, R:R {rr:.2f})",
+                  entry=entry, stop=float(stop), target=float(target), rr=float(rr),
+                  size_units=float(size), risk_cash=float(risk_cash), gates=gates)
+
+
+# --------------------------------------------------------------------------- #
+# Historical feedback — walk the bars, apply the process, tally the outcomes.
+# This is the "buena retroalimentación": how the WHOLE decision process behaves,
+# not any single indicator. Costs and next-open fills included; no lookahead.
+# --------------------------------------------------------------------------- #
+def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0):
+    n = c.size
+    warmup = max(cfg.ema_period, 30) + cfg.horizon
+    # Precompute a single edge precondition on the in-sample half, so Gate B is
+    # not re-bootstrapped every bar (O(n^2)); honest because a rule with no
+    # validated edge overall should keep the process flat throughout.
+    cut = int(n * 0.6)
+    rule_sig = bt.rule_ema_trend(o[:cut], h[:cut], l[:cut], c[:cut], period=cfg.ema_period)
+    net_is, cost = bt.simulate(rule_sig, o[:cut], c[:cut], cfg.horizon, cost_bps)
+    bstats_is = bt.compute_stats(net_is, cost)
+    edge_override = (bstats_is.verdict == "edge",
+                     f"in-sample edge={bstats_is.verdict} (exp {bstats_is.expectancy_bps:+.1f}bps)")
+
+    actions = {"BUY": 0, "SELL": 0, "NO-TRADE": 0}
+    trades = []
+    busy_until = -1
+    for t in range(warmup, n - cfg.horizon):
+        st = decide(o[:t + 1], h[:t + 1], l[:t + 1], c[:t + 1], cfg, edge_override)
+        actions[st.action] += 1
+        if st.action == "NO-TRADE" or t + 1 <= busy_until:
+            continue
+        # open a simulated position at next open; exit at stop/target/timeout
+        entry_i = t + 1
+        direction = 1 if st.action == "BUY" else -1
+        entry_px = o[entry_i]
+        exit_px, exit_reason = None, "timeout"
+        for k in range(entry_i, min(entry_i + cfg.horizon, n)):
+            if direction > 0:
+                if l[k] <= st.stop: exit_px, exit_reason = st.stop, "stop"; break
+                if h[k] >= st.target: exit_px, exit_reason = st.target, "target"; break
+            else:
+                if h[k] >= st.stop: exit_px, exit_reason = st.stop, "stop"; break
+                if l[k] <= st.target: exit_px, exit_reason = st.target, "target"; break
+        if exit_px is None:
+            exit_px = o[min(entry_i + cfg.horizon, n - 1)]
+        cost = 2.0 * cost_bps / 1e4
+        r = direction * np.log(exit_px / entry_px) - cost
+        trades.append((r, exit_reason))
+        busy_until = min(entry_i + cfg.horizon, n)
+
+    rets = np.array([r for r, _ in trades], dtype=float)
+    reasons = {}
+    for _, why in trades:
+        reasons[why] = reasons.get(why, 0) + 1
+    stats = bt.compute_stats(rets, 2.0 * cost_bps / 1e4) if rets.size else None
+    return {
+        "decisions": actions,
+        "trades": int(rets.size),
+        "exit_reasons": reasons,
+        "expectancy_bps": float(rets.mean() * 1e4) if rets.size else 0.0,
+        "win_rate": float(np.mean(rets > 0)) if rets.size else 0.0,
+        "verdict": stats.verdict if stats else "no-trades",
+        "ci95_bps": [stats.ci95_ret[0] * 1e4, stats.ci95_ret[1] * 1e4] if stats else None,
+        "edge_precondition": edge_override[1],
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--symbol", default="?")
+    ap.add_argument("--tf", default="15")
+    ap.add_argument("--horizon", type=int, default=16)
+    ap.add_argument("--min-rr", type=float, default=1.5)
+    ap.add_argument("--simulate", action="store_true",
+                    help="historical feedback: tally what the process would have done")
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args()
+
+    payload = json.load(sys.stdin)
+    bars = payload.get("bars") or payload.get("ohlcv") or []
+    if not bars:
+        raise SystemExit("no bars in input")
+    o = np.array([b["open"] for b in bars], float)
+    h = np.array([b["high"] for b in bars], float)
+    l = np.array([b["low"] for b in bars], float)
+    c = np.array([b["close"] for b in bars], float)
+    cfg = Config(horizon=args.horizon, min_rr=args.min_rr)
+
+    if args.simulate:
+        fb = simulate_process(o, h, l, c, cfg)
+        if args.json:
+            print(json.dumps(fb, indent=2)); return
+        _print_feedback(args, fb)
+        return
+
+    st = decide(o, h, l, c, cfg)
+    if args.json:
+        print(json.dumps(st.as_dict(), indent=2)); return
+    _print_stance(args, st, float(c[-1]))
+
+
+def _print_stance(args, st, last):
+    W = 74
+    print("=" * W)
+    print(f" DECISION  {args.symbol} {args.tf}m   last={last:.2f}   (SIMULATION — no order placed)")
+    print("=" * W)
+    print(f"\n  >>> {st.action}  [{st.confidence}]   {st.reason}\n")
+    for g in st.gates:
+        mark = "PASS" if g["passed"] else "FAIL"
+        print(f"  [{mark}] {g['name']:<14} {g['detail']}")
+    if st.action != "NO-TRADE":
+        print(f"\n  entry {st.entry:.2f}  stop {st.stop:.2f}  target {st.target:.2f}  "
+              f"R:R {st.rr:.2f}")
+        print(f"  size {st.size_units:.4f} units  (risk ${st.risk_cash:.2f} at {last:.2f})")
+    else:
+        print("\n  Flat is a position. No setup meets the bar; the honest move is to wait.")
+    print("=" * W)
+    print("Guardrail: this is a simulated recommendation. No broker was contacted and")
+    print("no order was placed. Validate on Replay/paper before ever risking real money.")
+    print("=" * W)
+
+
+def _print_feedback(args, fb):
+    W = 74
+    print("=" * W)
+    print(f" PROCESS FEEDBACK  {args.symbol} {args.tf}m   (walk-forward simulation)")
+    print("=" * W)
+    d = fb["decisions"]
+    total = sum(d.values())
+    print(f"\n  decisions: {total} bars evaluated")
+    for k in ("NO-TRADE", "BUY", "SELL"):
+        pct = 100 * d[k] / total if total else 0
+        print(f"    {k:<10} {d[k]:>4}  ({pct:.1f}%)")
+    print(f"\n  edge precondition: {fb['edge_precondition']}")
+    print(f"  simulated trades : {fb['trades']}")
+    if fb["trades"]:
+        print(f"  exit reasons     : {fb['exit_reasons']}")
+        print(f"  win rate         : {fb['win_rate']*100:.1f}%")
+        print(f"  expectancy       : {fb['expectancy_bps']:+.2f} bps/trade (net)")
+        ci = fb["ci95_bps"]
+        print(f"  mean 95% CI      : [{ci[0]:+.2f}, {ci[1]:+.2f}] bps   verdict={fb['verdict']}")
+    else:
+        print("  The process stayed FLAT the whole window — no setup cleared all gates.")
+        print("  That is the correct, honest outcome when there is no validated edge.")
+    print("=" * W)
+
+
+if __name__ == "__main__":
+    main()

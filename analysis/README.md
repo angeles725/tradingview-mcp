@@ -18,6 +18,7 @@ single point price.
 | `quant.py` | Pure numerical primitives (trend, volatility, RSI, EMA, Monte Carlo, conditional probability, bootstrap CI). No I/O. |
 | `analyze.py` | Reads TradingView OHLCV JSON on stdin, prints an honest assessment report. |
 | `backtest.py` | Turns a candidate RULE into a validated edge — or refutes it — with costs, out-of-sample split, and independent (non-overlapping) trades. |
+| `decide.py` | Composes everything into a stance: BUY / SELL / NO-TRADE, with the reason for every gate and honest sizing. **Simulation only — never places an order.** |
 | `test_quant.py` | Sanity tests for the math (RSI, Wilson CI, OLS, Theil-Sen, cones). |
 | `test_analyze.py` | Lookahead-leakage guard for the conditional builder. |
 | `test_backtest.py` | Next-open fill / no-lookahead, cost monotonicity, thin-sample, no-free-edge-on-random-walk. |
@@ -93,6 +94,33 @@ node src/cli/index.js ohlcv --count 300 \
   overlapping (182 trades) but collapsed to a non-significant `thin-sample`
   (26 independent trades, CI crossing 0) once autocorrelation was removed — the
   overlapping view had manufactured the edge.
+
+## The decision engine — BUY / SELL / NO-TRADE
+
+`decide.py` is the top layer. It composes trend, regime, the volatility cone, and
+the backtest verdict into a single stance, and it **defaults to NO-TRADE**. A
+trade is proposed only when every gate passes:
+
+- **Gate A — direction**: a statistically significant trend, a regime aligned
+  with it, and VR>1 momentum. Otherwise there is no defensible direction.
+- **Gate B — edge**: the rule in that direction has a cost-surviving net edge
+  (bootstrap CI clears zero). No validated edge → no trade.
+- **Gate C — risk/reward**: stop at k·σ (cone-scaled), target at the cone's P75,
+  R:R at or above the threshold. Position size then comes from a fixed risk
+  fraction over the stop distance — never from conviction.
+
+```bash
+# current stance
+node src/cli/index.js ohlcv --count 300 | $VENV analysis/decide.py --symbol XAUUSD --tf 15
+# process feedback — walk the bars and tally what the process would have done
+node src/cli/index.js ohlcv --count 300 | $VENV analysis/decide.py --simulate
+```
+
+**Safety:** `decide.py` never imports the tv CLI, never calls `replay_trade`, and
+never contacts a broker. It reads bars and prints a recommendation — nothing
+more. Its purpose is to improve the process with honest feedback (paper only),
+per the project's demo-before-real-money rule. On live gold it returns NO-TRADE
+and says which gate blocked it — the honest, common outcome.
 
 ## The lookahead trap (why `test_analyze.py` exists)
 
