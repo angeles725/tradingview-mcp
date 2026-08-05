@@ -95,6 +95,38 @@ node src/cli/index.js ohlcv --count 300 \
   (26 independent trades, CI crossing 0) once autocorrelation was removed — the
   overlapping view had manufactured the edge.
 
+## Recurring collection (Claude Code hooks, no cron)
+
+To grow history you must collect repeatedly. `collect-hook.sh` does this ONLY
+while Claude Code is open in this project (it is a hook, so it cannot fire when
+Claude is closed) AND TradingView is reachable. It is gated and detached:
+
+- **Throttle** — collects at most once per 30 min (a stamp file's mtime).
+- **TV check** — `curl 127.0.0.1:9222`; if TradingView is closed it exits doing
+  nothing.
+- **Detached** — the pull runs in the background, so the hook returns in ~20 ms
+  and never delays Claude. Output goes to `analysis/data/collect.log`.
+
+The script self-resolves the project path and node/python, so it is not tied to
+a machine. Wire it in `.claude/settings.json` (kept local, not committed):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup|resume|clear",
+        "hooks": [ { "type": "command", "command": "$CLAUDE_PROJECT_DIR/analysis/collect-hook.sh" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "$CLAUDE_PROJECT_DIR/analysis/collect-hook.sh" } ] }
+    ]
+  }
+}
+```
+
+For 15m bars the no-gap window is ~75 h, so opening Claude Code here every few
+days keeps history unbroken. Inspect with `python3 analysis/collect.py --stats`.
+
 ## The decision engine — BUY / SELL / NO-TRADE
 
 `decide.py` is the top layer. It composes trend, regime, the volatility cone, and
