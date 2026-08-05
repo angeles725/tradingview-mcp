@@ -1,0 +1,69 @@
+"""
+Tests for the OHLCV collector. Stdlib only. Run:
+    python analysis/test_collect.py
+"""
+
+import os
+import tempfile
+
+import collect as co
+
+
+def _assert(cond, msg):
+    if not cond:
+        raise AssertionError(msg)
+
+
+def _bar(t, close):
+    return {"time": t, "open": close - 1, "high": close + 1,
+            "low": close - 2, "close": close, "volume": 100}
+
+
+def test_merge_dedups_and_sorts():
+    existing = {}
+    ordered, n_new, n_upd = co.merge(existing, [_bar(30, 3), _bar(10, 1), _bar(20, 2)])
+    _assert([r["time"] for r in ordered] == [10, 20, 30], "must sort by time")
+    _assert(n_new == 3 and n_upd == 0, f"new/upd wrong: {n_new}/{n_upd}")
+    # merging overlapping window adds only the genuinely new bar
+    existing = {r["time"]: r for r in ordered}
+    ordered2, n_new2, n_upd2 = co.merge(existing, [_bar(20, 2), _bar(40, 4)])
+    _assert(n_new2 == 1 and n_upd2 == 0, f"overlap should add 1: {n_new2}/{n_upd2}")
+    _assert(len(ordered2) == 4, "total must be 4 after overlap merge")
+
+
+def test_repeated_timestamp_updates_forming_bar():
+    existing = {r["time"]: r for r in co.merge({}, [_bar(10, 1)])[0]}
+    # same timestamp, different close (the last live bar kept forming)
+    ordered, n_new, n_upd = co.merge(existing, [_bar(10, 5)])
+    _assert(n_new == 0 and n_upd == 1, f"should update not append: {n_new}/{n_upd}")
+    _assert(ordered[0]["close"] == 5.0, "latest pull must win for a forming bar")
+
+
+def test_save_load_roundtrip_and_emit():
+    with tempfile.TemporaryDirectory() as d:
+        path = co.store_path(d, "OANDA:XAUUSD", "15")
+        rows, _, _ = co.merge({}, [_bar(10, 1), _bar(20, 2)])
+        co.save_store(path, rows)
+        _assert(os.path.exists(path), "store file must exist")
+        reload = co.load_store(path)
+        _assert(set(reload) == {10, 20}, "reload keys mismatch")
+        _assert(reload[20]["close"] == 2.0, "reload value mismatch")
+        # symbol ':' must be sanitized into the filename
+        _assert("OANDA_XAUUSD_15.csv" in path, f"unsafe filename: {path}")
+
+
+def test_atomic_save_no_partial_on_reopen():
+    with tempfile.TemporaryDirectory() as d:
+        path = co.store_path(d, "X", "5")
+        co.save_store(path, co.merge({}, [_bar(1, 1)])[0])
+        co.save_store(path, co.merge(co.load_store(path), [_bar(2, 2)])[0])
+        _assert(set(co.load_store(path)) == {1, 2}, "second save must extend, not corrupt")
+        _assert(not os.path.exists(path + ".tmp"), "no leftover temp file")
+
+
+if __name__ == "__main__":
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    for fn in fns:
+        fn()
+        print(f"  ok  {fn.__name__}")
+    print(f"\n{len(fns)}/{len(fns)} passed")
