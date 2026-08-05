@@ -77,6 +77,18 @@ def test_no_free_edge_on_random_walk():
             f"exp={stats.expectancy_bps:.2f} CI={stats.ci95_ret}")
 
 
+def test_return_entries_align_with_trades():
+    o = np.arange(10, 40, dtype=float)
+    c = o + 0.5
+    signal = np.zeros(o.size, dtype=bool)
+    signal[[3, 10, 20]] = True
+    net, entries, cost = bt.simulate(signal, o, c, hold=2, cost_bps_per_side=0.0,
+                                     return_entries=True)
+    _assert(entries.size == net.size, "entries must align 1:1 with trades")
+    # non-overlapping, well-spaced signals -> entry = signal_bar + 1
+    _assert(list(entries) == [4, 11, 21], f"entries misaligned: {list(entries)}")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

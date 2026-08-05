@@ -119,6 +119,10 @@ def bootstrap_mean_ci(x: np.ndarray, n_boot: int = 10000,
     Percentile bootstrap CI for the mean. Distribution-free — no normality
     assumption on the per-trade P&L, whose tails are fat and skewed. Returns
     (lo, hi); if the interval excludes 0 the mean edge is significant.
+
+    NOTE: this is the i.i.d. bootstrap. It assumes the samples are independent;
+    for a SERIALLY DEPENDENT series (raw returns, overlapping trades) use
+    bootstrap_mean_ci_block, which preserves short-range dependence.
     """
     x = np.asarray(x, dtype=float)
     if x.size == 0:
@@ -128,6 +132,100 @@ def bootstrap_mean_ci(x: np.ndarray, n_boot: int = 10000,
     means = x[idx].mean(axis=1)
     lo, hi = np.percentile(means, [100 * alpha / 2, 100 * (1 - alpha / 2)])
     return (float(lo), float(hi))
+
+
+def stationary_bootstrap_indices(n: int, m: int, expected_block: float,
+                                 n_paths: int, rng) -> np.ndarray:
+    """
+    Politis-Romano (1994) stationary bootstrap index matrix, shape (n_paths, m).
+    Each path is built from random-length contiguous blocks (geometric length,
+    mean `expected_block`), wrapping around the series. Resampling BLOCKS instead
+    of single points preserves short-range serial dependence — volatility
+    clustering, momentum, mean reversion — that the i.i.d. bootstrap destroys.
+    """
+    if n == 0:
+        return np.empty((n_paths, m), dtype=int)
+    p = 1.0 / max(expected_block, 1.0)     # per-step restart probability
+    out = np.empty((n_paths, m), dtype=int)
+    for pth in range(n_paths):
+        i = int(rng.integers(0, n))
+        for t in range(m):
+            out[pth, t] = i
+            if rng.random() < p:
+                i = int(rng.integers(0, n))    # start a new block
+            else:
+                i = (i + 1) % n                 # continue the current block
+    return out
+
+
+def bootstrap_mean_ci_block(x: np.ndarray, expected_block: float = 10.0,
+                            n_boot: int = 5000, alpha: float = 0.05,
+                            seed: int = 7) -> tuple:
+    """
+    Stationary-bootstrap CI for the mean of a SERIALLY DEPENDENT series. Wider
+    (more honest) than the i.i.d. CI when the data are autocorrelated, because
+    it does not pretend neighbouring samples are independent.
+    """
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        return (float("nan"), float("nan"))
+    rng = np.random.default_rng(seed)
+    idx = stationary_bootstrap_indices(x.size, x.size, expected_block, n_boot, rng)
+    means = x[idx].mean(axis=1)
+    lo, hi = np.percentile(means, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+    return (float(lo), float(hi))
+
+
+# --------------------------------------------------------------------------- #
+# Regime — is the series trending or mean-reverting? A trend rule that looks
+# good only inside a trend is not an edge; regime tells you when to trust it.
+# --------------------------------------------------------------------------- #
+def variance_ratio(returns: np.ndarray, k: int) -> float:
+    """
+    Lo-MacKinlay variance ratio VR(k) = Var(k-bar return) / (k * Var(1-bar
+    return)), overlapping estimator. VR ~ 1 random walk; VR > 1 positive serial
+    correlation (trending/momentum); VR < 1 mean reversion. A pure random walk
+    has no exploitable serial structure.
+    """
+    r = np.asarray(returns, dtype=float)
+    n = r.size
+    if n < k + 1 or k < 1:
+        return float("nan")
+    var1 = np.var(r, ddof=1)
+    if var1 == 0:
+        return float("nan")
+    # overlapping k-bar returns X_t = r_t + ... + r_{t-k+1}, length n-k+1
+    csum = np.cumsum(r)
+    ksum = csum[k - 1:] - np.concatenate(([0.0], csum[:-k]))
+    vark = np.var(ksum, ddof=1)
+    return float(vark / (k * var1))
+
+
+def classify_regime(closes: np.ndarray, window: int = 20,
+                    r2_floor: float = 0.30) -> np.ndarray:
+    """
+    Per-bar regime label from a rolling linear regression: 'trend-up',
+    'trend-down', or 'chop'. A bar is trending only when the window R^2 clears
+    the noise floor; otherwise it is chop. The warm-up bars are 'chop' by
+    default (no window yet). Aligned to `closes`.
+    """
+    c = np.asarray(closes, dtype=float)
+    n = c.size
+    labels = np.array(["chop"] * n, dtype=object)
+    x = np.arange(window, dtype=float)
+    xm = x.mean()
+    sxx = np.sum((x - xm) ** 2)
+    for t in range(window - 1, n):
+        y = c[t - window + 1:t + 1]
+        ym = y.mean()
+        slope = np.sum((x - xm) * (y - ym)) / sxx
+        yhat = ym + slope * (x - xm)
+        ss_res = np.sum((y - yhat) ** 2)
+        ss_tot = np.sum((y - ym) ** 2)
+        r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+        if r2 >= r2_floor:
+            labels[t] = "trend-up" if slope > 0 else "trend-down"
+    return labels
 
 
 # --------------------------------------------------------------------------- #

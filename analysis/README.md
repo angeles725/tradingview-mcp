@@ -59,6 +59,15 @@ node src/cli/index.js ohlcv --count 300 \
   **Student-t** (parametric fat tails). When the bootstrap/t band is wider than
   Gaussian, tails are fat and position size must come down. Run zero-drift so
   P(up) ≈ 0.50 by construction — no directional bet is injected.
+- **Regime** — a variance ratio (Lo–MacKinlay: VR>1 trending/momentum, VR<1
+  mean-reverting, ~1 random) and a rolling-R² label (`trend-up` / `trend-down` /
+  `chop`). A trend rule that looks good only inside a trend is not an edge;
+  regime tells you when to trust a result.
+- **Serial dependence** — a **stationary (block) bootstrap** (Politis–Romano)
+  resamples contiguous blocks, preserving the short-range dependence the i.i.d.
+  bootstrap destroys. It is the honest CI for autocorrelated data; the backtest
+  reports it alongside the i.i.d. CI, and it splits trade expectancy **by
+  regime** so a trend-only edge is exposed.
 - **Conditional P(next bar up)** — for each RSI/candle condition, the rate
   against the unconditional baseline, with a **Wilson score 95% CI** and a
   **binomial test** p-value. A bucket is only an *edge* when n ≥ 30 AND the CI

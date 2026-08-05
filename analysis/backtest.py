@@ -88,7 +88,8 @@ class BTStats:
         return asdict(self)
 
 
-def simulate(signal, o, c, hold, cost_bps_per_side, direction=1, overlap=False):
+def simulate(signal, o, c, hold, cost_bps_per_side, direction=1, overlap=False,
+             return_entries=False):
     """
     Fill each signal at next-bar OPEN, exit `hold` bars later at the OPEN.
     Returns per-trade NET log returns (round-trip cost subtracted).
@@ -104,6 +105,7 @@ def simulate(signal, o, c, hold, cost_bps_per_side, direction=1, overlap=False):
     n = o.size
     cost = 2.0 * cost_bps_per_side / 1e4   # round-trip, in return units
     trades = []
+    entries = []
     busy_until = -1                        # index up to which a position is open
     for t in np.flatnonzero(signal):
         entry_i = t + 1
@@ -114,8 +116,12 @@ def simulate(signal, o, c, hold, cost_bps_per_side, direction=1, overlap=False):
             continue                       # already in a trade — skip this signal
         gross = direction * np.log(o[exit_i] / o[entry_i])
         trades.append(gross - cost)
+        entries.append(entry_i)
         busy_until = exit_i
-    return np.array(trades, dtype=float), cost
+    net = np.array(trades, dtype=float)
+    if return_entries:
+        return net, np.array(entries, dtype=int), cost
+    return net, cost
 
 
 def compute_stats(net, cost=0.0, min_n=30) -> BTStats:
@@ -179,9 +185,24 @@ def main():
     c = np.array([b["close"] for b in bars], float)
 
     signal = RULES[args.rule](o, h, l, c, period=args.period)
-    net, cost = simulate(signal, o, c, args.hold, args.cost_bps, overlap=args.overlap)
+    net, entries, cost = simulate(signal, o, c, args.hold, args.cost_bps,
+                                  overlap=args.overlap, return_entries=True)
     stats = compute_stats(net, cost)
     is_stats, oos_stats = walk_forward(signal, o, c, args.hold, cost, overlap=args.overlap)
+
+    # Serial-dependence-honest CI (trades cluster by regime even when non-overlapping)
+    block_ci = q.bootstrap_mean_ci_block(net) if net.size else (float("nan"),) * 2
+
+    # Per-regime expectancy — is the edge only inside a trend?
+    regimes = q.classify_regime(c, window=20)
+    by_regime = {}
+    for lbl in ("trend-up", "trend-down", "chop"):
+        sel = net[np.array([str(regimes[i]) == lbl for i in entries], dtype=bool)] \
+            if net.size else np.array([])
+        by_regime[lbl] = {
+            "n": int(sel.size),
+            "expectancy_bps": float(sel.mean() * 1e4) if sel.size else 0.0,
+        }
 
     report = {
         "symbol": args.symbol, "timeframe": args.tf, "rule": args.rule,
@@ -190,6 +211,8 @@ def main():
         "signals_fired": int(signal.sum()), "independent_trades": int(stats.n),
         "bars": int(c.size),
         "full": stats.as_dict(),
+        "block_bootstrap_ci95_bps": [block_ci[0] * 1e4, block_ci[1] * 1e4],
+        "by_regime": by_regime,
         "in_sample": is_stats.as_dict(), "out_of_sample": oos_stats.as_dict(),
     }
     if args.json:
@@ -217,6 +240,14 @@ def _print(r):
         print(f"  profit factor: {s['profit_factor']:.2f}")
 
     block("FULL SAMPLE", r["full"])
+    bci = r["block_bootstrap_ci95_bps"]
+    print(f"  block-boot CI: [{bci[0]:+.2f}, {bci[1]:+.2f}] bps  "
+          f"(serial-dependence honest; wider = trades cluster by regime)")
+
+    print("\nBY REGIME (entry-bar regime; is the edge only inside a trend?)")
+    for lbl, d in r["by_regime"].items():
+        print(f"  {lbl:<12} n={d['n']:>3}   expectancy {d['expectancy_bps']:+.2f} bps")
+
     block("IN-SAMPLE (first 60%)", r["in_sample"])
     block("OUT-OF-SAMPLE (last 40%)", r["out_of_sample"])
 

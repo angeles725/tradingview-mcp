@@ -120,6 +120,13 @@ def main():
     cone_b = q.mc_bootstrap(S0, ret, args.horizon, seed=args.seed)
     cone_t = q.mc_student_t(S0, ret, args.horizon, seed=args.seed)
 
+    # --- Regime (trending vs mean-reverting) -----------------------------
+    regime_labels = q.classify_regime(c, window=20)
+    regime_now = str(regime_labels[-1])
+    uniq, counts = np.unique(regime_labels, return_counts=True)
+    regime_mix = {str(k): int(v) for k, v in zip(uniq, counts)}
+    vr = {k: q.variance_ratio(ret, k) for k in (2, 4, 8)}
+
     # --- Conditional probabilities ---------------------------------------
     baseline = float(np.mean(np.diff(c) > 0))
     conds, next_up = build_conditions(c, o, rsi, ret)
@@ -144,6 +151,7 @@ def main():
             "implied_daily_pct": daily_pct,
         },
         "rsi": {"period": args.rsi_period, "now": None if np.isnan(rsi_now) else float(rsi_now)},
+        "regime": {"now": regime_now, "mix": regime_mix, "variance_ratio": vr},
         "monte_carlo": {"gaussian": cone_g, "bootstrap": cone_b, "student_t": cone_t},
         "baseline_next_up": baseline,
         "conditionals": conditionals,
@@ -192,6 +200,14 @@ def _print_human(r):
     rsi = r["rsi"]["now"]
     print(f"\nMOMENTUM   RSI(14, Wilder) = {_fmt(rsi,1)}   "
           f"(corroboration only; high RSI != sell in a trend)")
+
+    rg = r["regime"]
+    vr = rg["variance_ratio"]
+    mix = "  ".join(f"{k}:{v}" for k, v in sorted(rg["mix"].items()))
+    print(f"\nREGIME   now = {rg['now']}")
+    print(f"  window mix   : {mix}")
+    print(f"  variance ratio: VR2={_fmt(vr[2],2)}  VR4={_fmt(vr[4],2)}  VR8={_fmt(vr[8],2)}   "
+          f"(>1 trending/momentum, <1 mean-reverting, ~1 random)")
 
     print(f"\nMONTE CARLO CONE  ({r['horizon_bars']} bars ahead, zero-drift)")
     print(f"  {'model':<22}{'P5':>10}{'P25':>10}{'P50':>10}{'P75':>10}{'P95':>10}{'P(up)':>8}")
