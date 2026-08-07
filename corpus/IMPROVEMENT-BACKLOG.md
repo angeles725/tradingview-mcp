@@ -115,6 +115,21 @@ help on gold 15m; simpler is better here. Backfill logs are regenerable backtest
   ADAPTIVE (regime-aware vol) or simply REPORTING the realized coverage so the nominal 90% band is read as its
   measured ~82%. Not shipping a fabricated "fix". `analysis/backfill.py` lets this be re-measured anytime.
 
+**Cross-symbol evidence (2026-08-07, 59 windows each, h=4) — the under-coverage is GOLD-SPECIFIC, not systemic:**
+
+| symbol | cover90 (target 0.90) | cover50 (0.50) |
+|---|---|---|
+| gold (recent) | **0.82** (under) | 0.44–0.51 |
+| EURUSD | 0.92 | 0.75 (over) |
+| BTCUSDT | 0.90–0.95 | 0.54 (good) |
+| SPX500 | 0.95–0.97 | 0.68 (over) |
+
+- EURUSD / BTC / SPX are well-calibrated or OVER-cover → a **global widening would break them** (push to ~0.98).
+  This confirms the fix must be **per-symbol / regime-adaptive**, and that gold's recent window was an unusual
+  high-tail-move period. Reporting realized coverage per symbol is the pragmatic honest path.
+- **Method gap found:** pinball loss is in PRICE units (BTC ~42, gold ~3, EURUSD ~0.000) → NOT comparable across
+  symbols/horizons. Normalize (per S0 / in bps) for cross-symbol model ranking. *(new method item)*
+
 ## Second-pass audit (2026-08-07, after the 20-item hardening)
 Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go decision.
 
