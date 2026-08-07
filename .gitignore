@@ -5,3 +5,6 @@ temp_*
 *.log
 discovery-log.json
 rules.json
+
+# regenerable backtest calibration samples
+corpus/forecasts-backfill*.jsonl

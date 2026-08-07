@@ -88,6 +88,22 @@ for f in analysis/test_*.py; do "$VENV" "$f"; done
 Fixes touching scipy paths (#10 GARCH, #12, #1 HAC) MUST be validated this way. Adding pytest to the
 venv (or a `make test` that uses it) is itself a P3 procedure improvement.
 
+## Calibration evidence (backfill, 2026-08-07)
+`analysis/backfill.py` walks NON-OVERLAPPING windows over the 479-bar gold store, forecasts from `bars[:t]`
+only (no lookahead, same zero-drift cones as analyze), and scores vs the realized close at t+h — an independent
+calibration sample without waiting for live forecasts.
+
+| horizon | n | cover90 (target 0.90) | cover50 (0.50) | best pinball |
+|---|---|---|---|---|
+| 1h (h=4) | 104 | gaussian 0.82 / boot 0.80 / t 0.82 (CI ~[0.73,0.88]) | gaussian **0.51** / boot 0.44 / t 0.45 | **gaussian** 3.100 |
+| 2h (h=8) | 52 | gaussian 0.87 / boot 0.85 / t 0.88 | ~0.42–0.46 | ~tied |
+
+**Findings (evidence-based):** (1) the **90% band UNDER-COVERS** (~81% at 1h, ~87% at 2h vs 90%) → cones a
+touch too narrow in the tails / horizon vol slightly underestimated, worse at 1h → *new work item: widen tail /
+revisit horizon-vol scaling*. (2) the **50% band is well-calibrated** (gaussian 0.51). (3) the **GAUSSIAN cone
+wins** pinball at n=104 — the fat-tail models don't help on gold 15m; simpler is better here. Backfill logs are
+regenerable backtest records (untracked).
+
 ## Second-pass audit (2026-08-07, after the 20-item hardening)
 Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go decision.
 
