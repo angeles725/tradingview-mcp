@@ -602,7 +602,10 @@ def _summarize_paths(S0: float, terminal: np.ndarray) -> dict:
         "P5": float(pct[0]), "P25": float(pct[1]), "P50": float(pct[2]),
         "P75": float(pct[3]), "P95": float(pct[4]),
         "p_up": float(np.mean(terminal > S0)),
-        "mean": float(np.mean(terminal)),
+        # Named to be explicit: E[terminal] of a lognormal sits ABOVE the median
+        # even at zero drift (Jensen), so it must NOT be read as an expected move.
+        # Deliver the median (P50) and the band; this is kept for completeness.
+        "mean_lognormal": float(np.mean(terminal)),
     }
 
 

@@ -49,9 +49,9 @@
 | # | Axis | Anchor | Weakness | Fix | Effort/Payoff |
 |---|---|---|---|---|---|
 | ~~15~~ | numerical-method | `quant.py:248` | EWMA seeded by single squared return, no de-mean [CERT] | **DONE 2026-08-07** — seed = mean(r²) over warm-up window (uncentered, matches the IGARCH recursion); test `test_ewma_seed_uses_warmup_window_not_single_return` | S / low-med |
-| 16 | forecast | `quant.py:364-372` | reported cone `mean` is Jensen-biased above median | emphasize median/band; drop or relabel mean | S / low |
+| ~~16~~ | forecast | `quant.py:364-372` | reported cone `mean` is Jensen-biased above median [CERT] | **DONE 2026-08-07** — key renamed `mean`→`mean_lognormal` with a comment that it is not an expected move; median/band remain the guidance (key was unused by display/forecast) | S / low |
 | 17 | tooling | `quant.py:90-96,241-323` | O(n²) Theil–Sen + pure-Python GARCH/EWMA don't scale with growing store | subsampled Theil–Sen, vectorize recursions, cap lookback | M / low-med |
-| 18 | data-capture | `collect.py:63-79` | no OHLC integrity check (`h>=max(o,c,l)`); poisons Parkinson/GK (`log(h/l)`) | validate/reject/repair bad bars on merge, log rejects | S / low-med |
+| ~~18~~ | data-capture | `collect.py:63-79` | no OHLC integrity check (`h>=max(o,c,l)`); poisons Parkinson/GK (`log(h/l)`) [CERT] | **DONE 2026-08-07** — `valid_ohlc(b)` (finite, positive, `h>=max(o,c,l)`, `l<=min(o,c,h)`); `main` filters invalid bars before merge and reports rejects; test `test_valid_ohlc_predicate` | S / low-med |
 | 19 | test-coverage | `test_quant/backtest/decide.py` | no tests for GARCH, OHLC vol vs reference, mc_student_t df guard, scale_sigma, walk_forward, #5 leak, VR significance, #4 CI wiring | add reference-value + regression tests | M / med |
 
 ## Already correct — do NOT redo

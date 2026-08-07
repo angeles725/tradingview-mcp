@@ -61,6 +61,19 @@ def test_atomic_save_no_partial_on_reopen():
         _assert(not os.path.exists(path + ".tmp"), "no leftover temp file")
 
 
+def test_valid_ohlc_predicate():
+    _assert(co.valid_ohlc({"open": 4, "high": 6, "low": 3, "close": 5}),
+            "a normal bar must be valid")
+    _assert(not co.valid_ohlc({"open": 5, "high": 3, "low": 6, "close": 5}),
+            "high < low must be rejected")
+    _assert(not co.valid_ohlc({"open": 5, "high": 5, "low": 4, "close": 9}),
+            "close above high must be rejected")
+    _assert(not co.valid_ohlc({"open": 5, "high": 5, "low": -1, "close": 5}),
+            "negative price must be rejected")
+    _assert(not co.valid_ohlc({"open": 5, "high": float("inf"), "low": 4, "close": 5}),
+            "non-finite price must be rejected")
+
+
 def test_contiguity_counts_session_gaps():
     # regular 60s bars with two big jumps (weekend/session gaps)
     times = [0, 60, 120, 180, 100000, 100060, 100120, 500000, 500060]

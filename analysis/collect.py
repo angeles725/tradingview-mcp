@@ -60,6 +60,21 @@ def load_store(path: str) -> dict:
     return rows
 
 
+def valid_ohlc(b) -> bool:
+    """A bar is valid iff O/H/L/C are finite and positive and satisfy
+    high >= max(open, close, low) and low <= min(open, close, high). A malformed
+    feed bar (h<l, negatives, NaN/inf) would poison log(h/l) range estimators
+    (Parkinson, Garman-Klass) downstream, so reject it at ingestion."""
+    try:
+        o, h, l, c = float(b["open"]), float(b["high"]), float(b["low"]), float(b["close"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    for v in (o, h, l, c):
+        if v != v or v in (float("inf"), float("-inf")) or v <= 0:   # NaN / inf / non-positive
+            return False
+    return h >= max(o, c, l) and l <= min(o, c, h)
+
+
 def merge(existing: dict, new_bars: list) -> tuple:
     """Merge new bars into the existing store (keyed by time). Returns
     (sorted_rows, n_new, n_updated). A repeated timestamp UPDATES the bar (the
@@ -156,11 +171,14 @@ def main():
     new_bars = read_bars_stdin()
     if not new_bars:
         raise SystemExit("no bars on stdin to collect")
+    clean = [b for b in new_bars if valid_ohlc(b)]
+    n_rej = len(new_bars) - len(clean)
     existing = load_store(path)
     before = len(existing)
-    ordered, n_new, n_upd = merge(existing, new_bars)
+    ordered, n_new, n_upd = merge(existing, clean)
     save_store(path, ordered)
-    print(f"collected {args.symbol} {args.tf}m: +{n_new} new, {n_upd} updated "
+    rej_note = f", {n_rej} rejected (bad OHLC)" if n_rej else ""
+    print(f"collected {args.symbol} {args.tf}m: +{n_new} new, {n_upd} updated{rej_note} "
           f"-> {len(ordered)} total (was {before})  [{path}]")
 
 

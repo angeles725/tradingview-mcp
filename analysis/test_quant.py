@@ -368,7 +368,7 @@ def test_mc_student_t_guards_degenerate_df():
     _assert("fallback" in out["model"] or "bootstrap" in out["model"],
             f"degenerate df must fall back, got model={out['model']}")
     _assert(out.get("df") == 1.5, f"degenerate df must be reported, got {out.get('df')}")
-    for key in ("P5", "P50", "P95", "mean"):
+    for key in ("P5", "P50", "P95", "mean_lognormal"):
         _assert(np.isfinite(out[key]), f"{key} must stay finite, got {out[key]}")
 
 
