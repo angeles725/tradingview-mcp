@@ -123,7 +123,15 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
                     f"CI=[{bstats.ci95_ret[0]*1e4:+.1f},{bstats.ci95_ret[1]*1e4:+.1f}], "
                     f"verdict={bstats.verdict}")
     else:
-        edge_ok, b_detail = edge_override
+        edge_ok, b_detail = edge_override[0], edge_override[1]
+        # The override may carry the direction it was validated for; if that
+        # disagrees with the direction we're about to trade (a slope flip between
+        # the precondition bar and now), the edge does not apply — veto Gate B.
+        edge_dir = edge_override[2] if len(edge_override) > 2 else direction
+        if edge_dir != 0 and edge_dir != direction:
+            edge_ok = False
+            b_detail = (f"{b_detail} — direction flip "
+                        f"(validated {edge_dir:+d}, trading {direction:+d})")
     gates.append(asdict(Gate("B_edge", edge_ok, b_detail)))
     if not edge_ok:
         return _no_trade("no cost-surviving edge in this direction (Gate B)", gates)
@@ -176,7 +184,7 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
     # --- All gates passed: size by fixed risk, capped by leverage ------------
     risk_cash = cfg.risk_frac * cfg.equity
     size, risk_cash = _position_size(risk_cash, risk, entry, cfg.equity, cfg.max_leverage)
-    confidence = _confidence(bp["p_target"], ev)
+    confidence = _confidence(bp["p_target"], ev, se_ev)
     action = "BUY" if direction > 0 else "SELL"
     return Stance(action=action, confidence=confidence,
                   reason=f"{action}: all gates passed ({regime}, R:R {rr:.2f})",
@@ -203,16 +211,21 @@ def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=1.0):
     net_is, cost = bt.simulate(rule_sig, o[:t], c[:t], cfg.horizon, cost_bps,
                                direction=direction)
     bs = bt.compute_stats(net_is, cost)
+    # Return the direction the edge was validated for, so decide() can refuse it
+    # if the slope flips between this bar and the trade bar (backlog #3).
     return (bs.verdict == "edge",
-            f"expanding edge@{t} dir={direction} {bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)")
+            f"expanding edge@{t} dir={direction} {bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)",
+            direction)
 
 
-def _confidence(p_target, ev):
-    """Confidence tied to the actual edge — the barrier hit-probability and a
-    positive EV — not ad-hoc R^2/VR thresholds. 'high' needs a clear directional
-    hit-probability AND positive expected value."""
-    if not (ev > 0):
-        return "medium"
+def _confidence(p_target, ev, se_ev):
+    """Confidence tied to the actual edge — the barrier hit-probability and how
+    far EV clears its Monte-Carlo noise (se_ev). Gate C already guarantees
+    ev > se_ev, so 'low' means EV only marginally clears that noise; 'high' needs
+    a clear directional hit-probability AND EV well clear of the noise."""
+    margin = float("inf") if se_ev <= 0 else ev / se_ev
+    if margin < 2.0:
+        return "low"
     return "high" if p_target >= 0.55 else "medium"
 
 

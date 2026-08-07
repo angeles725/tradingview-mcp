@@ -88,10 +88,31 @@ def test_sizing_risks_fixed_fraction():
 
 
 def test_confidence_tiers_reflect_edge():
-    # confidence must track the real edge (barrier hit-prob + EV), not ad-hoc R^2/VR
-    _assert(d._confidence(0.70, 1.0) == "high", "strong p_target -> high")
-    _assert(d._confidence(0.51, 1.0) == "medium", "marginal p_target -> medium")
-    _assert(d._confidence(0.90, 0.0) != "high", "no EV margin -> not high")
+    # confidence tracks the real edge: barrier hit-prob + how far EV clears its
+    # Monte-Carlo noise (se_ev). Gate C guarantees ev > se_ev, so 'low' means EV
+    # only marginally clears that noise; 'high' needs a strong p_target AND EV
+    # well clear of the noise. All three tiers must be reachable.
+    _assert(d._confidence(0.70, 1.0, 0.2) == "high", "strong p_target + clear EV -> high")
+    _assert(d._confidence(0.51, 1.0, 0.2) == "medium", "marginal p_target -> medium")
+    _assert(d._confidence(0.90, 0.11, 0.10) == "low", "EV barely clears MC noise -> low")
+    _assert(d._confidence(0.90, 1.0, 0.0) == "high", "zero se_ev (no noise) is not low")
+
+
+def test_edge_override_direction_must_match_trade():
+    # simulate_process validates the edge for the slope direction at bar t, but
+    # decide trades the slope direction at bar t+1. On a flip, a long-validated
+    # edge must NOT authorize a short trade (or vice-versa) — Gate B must veto.
+    o, h, l, c = _trending_series(200, seed=0)          # uptrend -> decide direction +1
+    flip = d.decide(o, h, l, c, Config(min_rr=0.0),
+                    edge_override=(True, "forced", -1))
+    _assert(flip.action == "NO-TRADE", "direction-flip edge must not authorize a trade")
+    _assert(flip.gates[-1]["name"] == "B_edge" and not flip.gates[-1]["passed"],
+            "Gate B must veto a direction-mismatched edge")
+    # a matching-direction override still passes Gate B
+    ok = d.decide(o, h, l, c, Config(min_rr=0.0),
+                  edge_override=(True, "forced", 1))
+    _assert(ok.gates[1]["name"] == "B_edge" and ok.gates[1]["passed"],
+            "matching-direction edge must pass Gate B")
 
 
 def test_ev_standard_error_shrinks_with_paths():
