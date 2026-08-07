@@ -99,10 +99,21 @@ calibration sample without waiting for live forecasts.
 | 2h (h=8) | 52 | gaussian 0.87 / boot 0.85 / t 0.88 | ~0.42–0.46 | ~tied |
 
 **Findings (evidence-based):** (1) the **90% band UNDER-COVERS** (~81% at 1h, ~87% at 2h vs 90%) → cones a
-touch too narrow in the tails / horizon vol slightly underestimated, worse at 1h → *new work item: widen tail /
-revisit horizon-vol scaling*. (2) the **50% band is well-calibrated** (gaussian 0.51). (3) the **GAUSSIAN cone
-wins** pinball at n=104 — the fat-tail models don't help on gold 15m; simpler is better here. Backfill logs are
-regenerable backtest records (untracked).
+touch too narrow in the tails / horizon vol slightly underestimated, worse at 1h. (2) the **50% band is
+well-calibrated** (gaussian 0.51). (3) the **GAUSSIAN cone wins** pinball at n=104 — the fat-tail models don't
+help on gold 15m; simpler is better here. Backfill logs are regenerable backtest records (untracked).
+
+**Diagnosis of the 90% under-coverage (attacked 2026-08-07 — NEGATIVE result, do not overfit):**
+- Tested alternative cones — a zero-drift **block-bootstrap** cone (serial-dependence) and an **empirical h-bar
+  return** cone — both still cover ~0.80–0.82. So it is **NOT a cone-shape problem** (gold 15m is currently
+  mean-reverting, VR<1, so serial-dependence widening does not apply). Root cause = **non-stationary vol**:
+  historical dispersion underestimates future tail dispersion.
+- Tested a **fixed widening factor** with a train/validate split: k≈1.30 hits 90% on the calibrate half but
+  **over-covers (98%) on the validate half** (the two halves differ, 77% vs 88% base coverage) → a constant
+  multiplier **does not generalize** (overfits the calibration regime).
+- **Conclusion:** no static fix (cone shape or fixed multiplier) robustly corrects it. Honest remedies are
+  ADAPTIVE (regime-aware vol) or simply REPORTING the realized coverage so the nominal 90% band is read as its
+  measured ~82%. Not shipping a fabricated "fix". `analysis/backfill.py` lets this be re-measured anytime.
 
 ## Second-pass audit (2026-08-07, after the 20-item hardening)
 Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go decision.
