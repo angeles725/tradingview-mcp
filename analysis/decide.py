@@ -78,7 +78,7 @@ def _no_trade(reason, gates, confidence="none"):
     return Stance(action="NO-TRADE", confidence=confidence, reason=reason, gates=gates)
 
 
-def decide(o, h, l, c, cfg: Config, edge_override=None) -> Stance:
+def decide(o, h, l, c, cfg: Config, edge_override=None, times=None) -> Stance:
     """Return a Stance. edge_override lets the historical sim skip the (slow)
     per-bar backtest by supplying a precomputed edge decision for Gate B."""
     gates: list = []
@@ -86,7 +86,7 @@ def decide(o, h, l, c, cfg: Config, edge_override=None) -> Stance:
     if n < max(cfg.ema_period, 30) + cfg.horizon:
         return _no_trade("insufficient bars for a decision", gates)
 
-    ret = q.log_returns(c)
+    ret = q.log_returns(c, times=times)   # gap-aware when timestamps are supplied
     trend = q.ols_trend(c, cfg.r2_floor)
     regime = str(q.classify_regime(c, window=20)[-1])
     vr = q.variance_ratio(ret, cfg.vr_k)
@@ -172,7 +172,7 @@ def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=1.0):
             f"expanding edge@{t}={bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)")
 
 
-def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None):
+def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None, times=None):
     n = c.size
     warmup = max(cfg.ema_period, 30) + cfg.horizon
     # Expanding-window edge precondition, recomputed only from bars[:t] (never the
@@ -191,7 +191,8 @@ def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None):
         if t - last_fit >= refit:
             edge_override = _edge_precondition(o, h, l, c, t, cfg, cost_bps)
             last_fit = t
-        st = decide(o[:t + 1], h[:t + 1], l[:t + 1], c[:t + 1], cfg, edge_override)
+        st = decide(o[:t + 1], h[:t + 1], l[:t + 1], c[:t + 1], cfg, edge_override,
+                    times=(times[:t + 1] if times is not None else None))
         actions[st.action] += 1
         if st.action == "NO-TRADE" or t + 1 <= busy_until:
             continue
@@ -250,16 +251,17 @@ def main():
     h = np.array([b["high"] for b in bars], float)
     l = np.array([b["low"] for b in bars], float)
     c = np.array([b["close"] for b in bars], float)
+    t = np.array([b.get("time", i) for i, b in enumerate(bars)], float)
     cfg = Config(horizon=args.horizon, min_rr=args.min_rr)
 
     if args.simulate:
-        fb = simulate_process(o, h, l, c, cfg)
+        fb = simulate_process(o, h, l, c, cfg, times=t)
         if args.json:
             print(json.dumps(fb, indent=2)); return
         _print_feedback(args, fb)
         return
 
-    st = decide(o, h, l, c, cfg)
+    st = decide(o, h, l, c, cfg, times=t)
     if args.json:
         print(json.dumps(st.as_dict(), indent=2)); return
     _print_stance(args, st, float(c[-1]))

@@ -61,6 +61,17 @@ def test_atomic_save_no_partial_on_reopen():
         _assert(not os.path.exists(path + ".tmp"), "no leftover temp file")
 
 
+def test_contiguity_counts_session_gaps():
+    # regular 60s bars with two big jumps (weekend/session gaps)
+    times = [0, 60, 120, 180, 100000, 100060, 100120, 500000, 500060]
+    n_gaps, step = co._contiguity(times)
+    _assert(step == 60, f"median step should be 60s, got {step}")
+    _assert(n_gaps == 2, f"expected 2 session gaps, got {n_gaps}")
+    # a perfectly contiguous series has no gaps
+    n0, s0 = co._contiguity([0, 60, 120, 180, 240])
+    _assert(n0 == 0, f"contiguous series must report 0 gaps, got {n0}")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

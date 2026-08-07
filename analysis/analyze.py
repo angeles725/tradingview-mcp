@@ -39,6 +39,7 @@ def load_bars(stream) -> dict:
         raise SystemExit("no bars in input (expected a `bars` array)")
     arr = {k: np.array([b[k] for b in bars], dtype=float)
            for k in ("open", "high", "low", "close", "volume")}
+    arr["time"] = np.array([b.get("time", i) for i, b in enumerate(bars)], dtype=float)
     arr["_meta"] = {
         "bar_count": payload.get("bar_count", len(bars)),
         "total_available": payload.get("total_available"),
@@ -91,7 +92,14 @@ def main():
     data = load_bars(sys.stdin)
     o, h, l, c = data["open"], data["high"], data["low"], data["close"]
     n = c.size
-    ret = q.log_returns(c)
+    # Gap-aware returns: drop cross-session/overnight jumps that would otherwise
+    # inflate sigma and corrupt GARCH/VR (see collect.py contiguity report).
+    ret = q.log_returns(c, times=data["time"])
+    n_gap_dropped = (n - 1) - ret.size
+    times = data["time"]
+    last_bar_unix = int(times[-1]) if times.size else 0
+    _dif = np.diff(times); _pos = _dif[_dif > 0]
+    bar_step_sec = int(np.median(_pos)) if _pos.size else 0
     bars_per_day = DEFAULT_BARS_PER_DAY.get(args.tf, 96)
 
     # --- Trend -----------------------------------------------------------
@@ -143,6 +151,10 @@ def main():
         "symbol": args.symbol,
         "timeframe": args.tf,
         "bars": int(n),
+        "returns_used": int(ret.size),
+        "cross_gap_dropped": int(n_gap_dropped),
+        "last_bar_unix": last_bar_unix,
+        "bar_step_sec": bar_step_sec,
         "total_available": data["_meta"]["total_available"],
         "last_price": S0,
         "horizon_bars": args.horizon,
@@ -181,6 +193,9 @@ def _print_human(r):
     print(f" HONEST ASSESSMENT  {r['symbol']}  {r['timeframe']}m   "
           f"n={r['bars']} bars (of {r['total_available']} avail)")
     print(f" Last price: {r['last_price']:.3f}   |   cone horizon: {r['horizon_bars']} bars")
+    if r.get("cross_gap_dropped", 0):
+        print(f" Contiguity: dropped {r['cross_gap_dropped']} cross-gap return(s); "
+              f"{r.get('returns_used')} contiguous returns used for vol/VR.")
     print("=" * W)
 
     t = r["trend"]

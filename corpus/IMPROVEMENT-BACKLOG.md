@@ -39,7 +39,7 @@
 | 8 | decision-logic | `decide.py:125-134` | Gate C target = zero-drift cone quantile ⇒ ~0 EV; ignores stop-vs-target hit probability | barrier-hit probabilities from same MC paths; require positive EV | M / med |
 | 9 | backtest-honesty | `backtest.py:151-160` `walk_forward` | single 60/40 split, no purge/embargo; trade at boundary leaks across cut | rolling/anchored WF or purged K-fold/CPCV, embargo = hold bars | M / med |
 | 10 | numerical-method | `quant.py:281-323` `garch11_vol` | Gaussian MLE on fat tails biases α/β; Nelder–Mead fragile; loose success check; untested | Student-t innovations, variance targeting, gradient optimizer + multi-start, recovery test | M / med |
-| 11 | data-capture | `collect.py:63-79` `merge` | no session/overnight gap detection → giant cross-gap "returns" inflate σ, distort GARCH/VR | detect non-uniform Δt, flag/exclude cross-gap returns, contiguity report | M / med |
+| ~~11~~ | data-capture | `collect.py:63-79` `merge` | no session/overnight gap detection → giant cross-gap "returns" inflate σ, distort GARCH/VR [CERT: 3-5 gaps in live gold 15m] | **DONE 2026-08-07** — `log_returns(closes, times, gap_tol)` drops cross-gap returns; analyze/decide capture `time` and pass it; `collect.py --stats` shows a contiguity report; tests `test_log_returns_excludes_cross_gap`, `test_contiguity_counts_session_gaps` | M / med |
 | ~~12~~ | forecast | `quant.py:404-426` `mc_student_t` | no `df>2` guard → infinite-variance blowup on ~280 pts [CERT] | **DONE 2026-08-07** — guard `df<=2`/non-finite/`scale<=0` → bootstrap-cone fallback, reports degenerate df; test `test_mc_student_t_guards_degenerate_df` (scipy venv) | S / med |
 | 13 | algorithm | `backtest.py:74-88`; `decide.py:203-212` | no Sharpe / Deflated Sharpe / max drawdown | add Sharpe+CI, Deflated/Probabilistic Sharpe (ties #3), max DD | M / med |
 | 14 | numerical-method | `quant.py:116-176` | percentile bootstrap under-covers for skewed mean | BCa or studentized bootstrap | M / low-med |
@@ -59,6 +59,14 @@
 - Non-overlapping trades by default; Politis–Romano stationary block bootstrap (`quant.py:137-176`);
   Wilson score intervals (`quant.py:432-443`).
 - Per-side/gross-vs-net costs; zero-drift cones; conditional lookahead guard test (`test_analyze.py`).
+
+## Delivered beyond the audit (user-requested)
+- **Forecast calibration tooling — DONE 2026-08-07.** New `analysis/forecast.py` (stdlib):
+  `record` (log a cone forecast from an analyze --json report), `score` (match matured forecasts to
+  realized closes and record 90%/50% band hits), `stats` (per-model coverage — evidence for whether the
+  cone is well-calibrated). Log: `corpus/forecasts.jsonl`. Tests: `test_forecast.py` (5). analyze report
+  now carries `last_bar_unix` + `bar_step_sec` so forecasts are self-contained. `collect-hook.sh` extended
+  to record + score every throttled tick, so the calibration record accumulates automatically.
 
 ## Discovered during audit (not in original 19)
 - **#20 `analyze.py --json` was completely broken [CERT] — FIXED 2026-08-07.** `Trend.significant` was a

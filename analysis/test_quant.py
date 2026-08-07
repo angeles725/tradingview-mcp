@@ -130,6 +130,20 @@ def test_classify_regime_labels_trend_and_chop():
     _assert(np.mean(labels2 == "chop") > 0.7, "noise should be mostly chop")
 
 
+def test_log_returns_excludes_cross_gap():
+    # A session/overnight gap makes one "bar return" a multi-period jump — a fat
+    # outlier that inflates sigma and corrupts GARCH/VR. With timestamps, the
+    # cross-gap return must be dropped; without them, behaviour is unchanged.
+    c = np.array([100.0, 101.0, 102.0, 200.0, 202.0])
+    times = np.array([0, 60, 120, 100000, 100060])   # big gap before index 3
+    base = q.log_returns(c)
+    _assert(base.size == 4, "no-times must still return n-1 contiguous returns")
+    r = q.log_returns(c, times=times)
+    _assert(r.size == 3, f"the cross-gap return (102->200) must be dropped, got {r.size}")
+    expected = np.array([math.log(101 / 100), math.log(102 / 101), math.log(202 / 200)])
+    _assert(np.allclose(r, expected), f"wrong returns kept: {r}")
+
+
 def test_newey_west_lrv_inflates_under_autocorrelation():
     rng = np.random.default_rng(1)
     u = rng.normal(0.0, 1.0, 500)

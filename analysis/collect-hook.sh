@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Gated OHLCV collection hook for OANDA:XAUUSD 15m.
+# Gated OHLCV collection + forecast feedback hook for OANDA:XAUUSD 15m.
+#
+# On each throttled tick it (a) merges the live window into the persistent store,
+# (b) RECORDS a next-hour cone forecast, and (c) SCORES any matured forecasts
+# against the accumulated store — building an honest calibration record over time
+# (corpus/forecasts.jsonl; inspect with `forecast.py stats`).
 #
 # Wired to Claude Code SessionStart + Stop. Because it is a hook, it can only
 # fire while Claude Code is running in this project — so it consumes NOTHING
@@ -20,6 +25,7 @@ PROJECT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SYMBOL="OANDA:XAUUSD"
 TF="15"
 THROTTLE_MIN=30
+HORIZON=4          # forecast horizon in bars (4 x 15m = next hour)
 
 # Resolve binaries via PATH, with sensible fallbacks for this machine.
 NODE="$(command -v node || echo /home/linuxbrew/.linuxbrew/bin/node)"
@@ -51,9 +57,18 @@ fi
 touch "$STAMP"
 nohup bash -c "
   cd '$PROJECT' || exit 0
-  '$NODE' src/cli/index.js ohlcv --count 300 2>>'$LOG' \
-    | '$PY' analysis/collect.py --symbol '$SYMBOL' --tf '$TF' >>'$LOG' 2>&1
-  echo \"[\$(date '+%F %T')] collect tick done\" >>'$LOG'
+  PULL=\$(mktemp)
+  '$NODE' src/cli/index.js ohlcv --count 300 >\"\$PULL\" 2>>'$LOG'
+  # (a) accumulate history
+  '$PY' analysis/collect.py --symbol '$SYMBOL' --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
+  # (b) record a next-hour forecast (cone from analyze; gap-aware)
+  '$PY' analysis/analyze.py --symbol '$SYMBOL' --tf '$TF' --horizon '$HORIZON' --json <\"\$PULL\" 2>>'$LOG' \
+    | '$PY' analysis/forecast.py record >>'$LOG' 2>&1
+  # (c) score matured forecasts against the accumulated store
+  '$PY' analysis/collect.py --symbol '$SYMBOL' --tf '$TF' --emit 2>>'$LOG' \
+    | '$PY' analysis/forecast.py score >>'$LOG' 2>&1
+  rm -f \"\$PULL\"
+  echo \"[\$(date '+%F %T')] collect+forecast tick done\" >>'$LOG'
 " >/dev/null 2>&1 &
 
 exit 0

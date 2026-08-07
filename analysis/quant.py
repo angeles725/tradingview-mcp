@@ -30,10 +30,24 @@ except Exception:  # pragma: no cover - exercised only on numpy-only hosts
 # --------------------------------------------------------------------------- #
 # Returns
 # --------------------------------------------------------------------------- #
-def log_returns(closes: np.ndarray) -> np.ndarray:
-    """Per-bar log returns r_t = ln(C_t / C_{t-1})."""
+def log_returns(closes: np.ndarray, times=None, gap_tol: float = 2.0) -> np.ndarray:
+    """Per-bar log returns r_t = ln(C_t / C_{t-1}).
+
+    If `times` (bar timestamps) is given, returns spanning a SESSION/OVERNIGHT
+    GAP are dropped: a return whose bar interval exceeds `gap_tol` x the median
+    interval is a multi-period jump, not a per-bar move, and would inflate sigma
+    and corrupt GARCH/VR. Without `times` the behaviour is unchanged.
+    """
     c = np.asarray(closes, dtype=float)
-    return np.diff(np.log(c))
+    r = np.diff(np.log(c))
+    if times is None or r.size == 0:
+        return r
+    dt = np.diff(np.asarray(times, dtype=float))
+    pos = dt[dt > 0]
+    if pos.size == 0:
+        return r
+    step = float(np.median(pos))
+    return r[dt <= gap_tol * step]
 
 
 # --------------------------------------------------------------------------- #

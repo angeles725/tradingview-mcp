@@ -107,7 +107,23 @@ def cmd_stats(store_dir: str) -> None:
         rows = load_store(os.path.join(store_dir, f))
         times = sorted(rows)
         span = f"{times[0]}..{times[-1]}" if times else "-"
-        print(f"  {f:<28} {len(rows):>6} bars   time {span}")
+        n_gaps, step = _contiguity(times)
+        gap_note = f"   gaps={n_gaps} (step={step}s)" if step else ""
+        print(f"  {f:<28} {len(rows):>6} bars   time {span}{gap_note}")
+
+
+def _contiguity(times: list, gap_tol: float = 2.0) -> tuple:
+    """Count non-contiguous jumps (session/overnight gaps) in a sorted time list.
+    Returns (n_gaps, median_step_seconds). Cross-gap bars make one 'return' a
+    multi-period jump that poisons downstream sigma/GARCH/VR — see quant.log_returns."""
+    if len(times) < 3:
+        return 0, 0
+    deltas = [b - a for a, b in zip(times, times[1:]) if b > a]
+    if not deltas:
+        return 0, 0
+    step = sorted(deltas)[len(deltas) // 2]      # median
+    n_gaps = sum(1 for d in deltas if d > gap_tol * step)
+    return n_gaps, int(step)
 
 
 def cmd_emit(path: str) -> None:
