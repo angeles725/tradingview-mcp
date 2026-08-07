@@ -159,21 +159,24 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
     bp = q.barrier_hit_probabilities(entry, o, h, l, c, cfg.horizon, stop, target,
                                      direction, drift_zero=False)
     ev = bp["p_target"] * reward - bp["p_stop"] * risk
-    c_ok = rr >= cfg.min_rr and np.isfinite(ev) and ev > 0
+    # EV must clear zero by more than its MC sampling error, so the gate is not
+    # decided by Monte-Carlo noise (single-seed p_target/p_stop carry error ~1/sqrt(n)).
+    se_ev = _ev_se(reward, risk, bp["p_target"], bp["p_stop"], bp.get("n", 0))
+    c_ok = rr >= cfg.min_rr and np.isfinite(ev) and ev > se_ev
     gates.append(asdict(Gate("C_risk_reward", c_ok,
                       f"entry={entry:.2f} stop={stop:.2f} target={target:.2f} "
                       f"R:R={rr:.2f} (min {cfg.min_rr})  "
                       f"P(tgt)={bp['p_target']:.2f} P(stop)={bp['p_stop']:.2f} "
-                      f"EV={ev:+.2f}")))
+                      f"EV={ev:+.2f}±{se_ev:.2f}")))
     if not c_ok:
         why = (f"reward:risk {rr:.2f} below {cfg.min_rr}" if rr < cfg.min_rr
-               else f"negative expected value (EV={ev:+.2f})")
+               else f"EV {ev:+.2f} not clear of MC noise (±{se_ev:.2f})")
         return _no_trade(f"{why} (Gate C)", gates)
 
     # --- All gates passed: size by fixed risk, capped by leverage ------------
     risk_cash = cfg.risk_frac * cfg.equity
     size, risk_cash = _position_size(risk_cash, risk, entry, cfg.equity, cfg.max_leverage)
-    confidence = "high" if (trend.r2 > 0.5 and vr > 1.1) else "medium"
+    confidence = _confidence(bp["p_target"], ev)
     action = "BUY" if direction > 0 else "SELL"
     return Stance(action=action, confidence=confidence,
                   reason=f"{action}: all gates passed ({regime}, R:R {rr:.2f})",
@@ -202,6 +205,27 @@ def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=1.0):
     bs = bt.compute_stats(net_is, cost)
     return (bs.verdict == "edge",
             f"expanding edge@{t} dir={direction} {bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)")
+
+
+def _confidence(p_target, ev):
+    """Confidence tied to the actual edge — the barrier hit-probability and a
+    positive EV — not ad-hoc R^2/VR thresholds. 'high' needs a clear directional
+    hit-probability AND positive expected value."""
+    if not (ev > 0):
+        return "medium"
+    return "high" if p_target >= 0.55 else "medium"
+
+
+def _ev_se(reward, risk, p_target, p_stop, n):
+    """MC standard error of EV = p_target*reward - p_stop*risk, from the multinomial
+    variance of the barrier hit-probabilities (includes the negative p_t/p_s
+    covariance). Lets the EV gate require EV to clear zero by more than MC noise."""
+    if n <= 0:
+        return float("inf")
+    var = (reward * reward * p_target * (1 - p_target)
+           + risk * risk * p_stop * (1 - p_stop)
+           + 2.0 * reward * risk * p_target * p_stop) / n
+    return float(np.sqrt(var)) if var > 0 else 0.0
 
 
 def _position_size(risk_cash, risk, entry, equity, max_leverage):

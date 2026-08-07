@@ -87,6 +87,19 @@ def test_sizing_risks_fixed_fraction():
     _assert(abs(implied - st.risk_cash) < 1e-6, "size must risk exactly risk_cash")
 
 
+def test_confidence_tiers_reflect_edge():
+    # confidence must track the real edge (barrier hit-prob + EV), not ad-hoc R^2/VR
+    _assert(d._confidence(0.70, 1.0) == "high", "strong p_target -> high")
+    _assert(d._confidence(0.51, 1.0) == "medium", "marginal p_target -> medium")
+    _assert(d._confidence(0.90, 0.0) != "high", "no EV margin -> not high")
+
+
+def test_ev_standard_error_shrinks_with_paths():
+    se_small = d._ev_se(1.0, 1.0, 0.5, 0.5, 100)
+    se_big = d._ev_se(1.0, 1.0, 0.5, 0.5, 10_000)
+    _assert(se_big < se_small and se_small > 0, "MC standard error shrinks with n")
+
+
 def test_position_size_leverage_cap():
     # uncapped: size = risk_cash/risk, actual risk_cash unchanged
     size, rc = d._position_size(100.0, 1.0, 100.0, 10_000.0, 100.0)

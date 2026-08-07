@@ -142,9 +142,11 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
   (S7 dedupe also guards). Test `test_lock_context_manager_guards_ops`. **S / med**
 
 ### P3 — hygiene
-- **S15 `confidence` label ad-hoc** (`decide.py:162`) — tie it to block-CI margin / PSR / EV. **S / low-med**
-- **S16 MC sampling error invisible on the hard EV gate** (single seed, `EV>0`) — report MC SE of p_target/p_stop/EV
-  and require EV to clear zero by more than its SE. **S / low-med**
+- ~~**S15**~~ **DONE 2026-08-07** — `_confidence(p_target, ev)` ties confidence to the barrier hit-probability and a
+  positive EV (not ad-hoc R^2/VR). Test `test_confidence_tiers_reflect_edge`. **S / low-med**
+- ~~**S16**~~ **DONE 2026-08-07** — `barrier_hit_probabilities` returns `n`; `_ev_se` gives the multinomial MC
+  standard error of EV; Gate C now requires `EV > se_ev` (clears zero by more than MC noise) and reports `EV±se`.
+  Test `test_ev_standard_error_shrinks_with_paths`. **S / low-med**
 
 ### Still solid (do NOT touch)
 No-lookahead fills; BH-FDR multiple testing; Wilson + Politis-Romano block + BCa CI machinery; `valid_ohlc` +

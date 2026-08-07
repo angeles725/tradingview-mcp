@@ -392,7 +392,7 @@ def barrier_hit_probabilities(entry: float, o: np.ndarray, h: np.ndarray,
     p_stop = float(np.mean((istop < it) | both_same))
     p_target = float(np.mean(it < istop))
     return {"p_target": p_target, "p_stop": p_stop,
-            "p_neither": float(1.0 - p_target - p_stop)}
+            "p_neither": float(1.0 - p_target - p_stop), "n": int(n)}
 
 
 def max_drawdown(returns: np.ndarray) -> float:
