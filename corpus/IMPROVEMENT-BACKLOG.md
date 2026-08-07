@@ -95,12 +95,13 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
 - ~~**S1**~~ **[CERT] DONE 2026-08-07** long-only edge precondition — `_edge_precondition` now derives
   `direction` from `ols_trend(c[:t]).slope` and passes it to `rule_ema_trend` + `simulate`; detail shows
   `dir=`. Test `test_edge_precondition_direction_follows_slope`. **S / high**
-- **S2 [CERT] gap-through fills credited at the stop** — `decide.py:219,222`: a bar that gaps past the stop
-  still exits at `st.stop`, an impossible fill that flatters the feedback. Fix: fill at `min(o[k], stop)`
-  (long) / `max(o[k], stop)` (short); add stop slippage. **S / high**
-- **S3 [INFER] frictionless execution overstates a bps-scale edge** — flat symmetric `cost_bps` (`backtest.py:114`,
-  Gate B hardcodes 1.0 `decide.py:113`); no spread, no slippage. Gold round-trip spread ~1.5-3 bps can flip
-  edge→no-edge. Fix: half-spread + slippage in ticks, symbol-configurable. **M / high**
+- ~~**S2**~~ **[CERT] DONE 2026-08-07** — exit logic extracted to `_resolve_exit`; gap-through stops fill at
+  `min(o[k],stop)` (long) / `max(o[k],stop)` (short); intrabar touches still fill at the level.
+  Test `test_resolve_exit_gap_through_fills_worse`. **S / high**
+- ~~**S3**~~ **DONE 2026-08-07** — `_resolve_exit` applies adverse `slip` to STOP (market) fills, not targets
+  (limit); `Config.cost_bps`/`slip_frac` added; Gate B uses `cfg.cost_bps` (no longer hardcoded 1.0);
+  `simulate_process` passes `cfg.slip_frac`. Defaults conservative (knob exposed; set gold-realistic values).
+  Test `test_resolve_exit_applies_stop_slippage`. **M / high** (spread/slippage per-side in backtest.simulate CLI still tunable)
 - **S4 [CERT] GARCH refit every bar in `simulate_process`** — `decide.py:126` fits GARCH per evaluated bar
   (multi-start) → O(n²·starts), unusable as the store grows. Fix: throttle σ on the `refit` cadence or pass a
   precomputed σ / EWMA fallback in the sim loop. **M / med-high**

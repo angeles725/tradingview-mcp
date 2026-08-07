@@ -114,6 +114,41 @@ def test_edge_precondition_ignores_future_bars():
     _assert(ref == scr, f"edge precondition at t leaked bars >= t: {ref} != {scr}")
 
 
+def test_resolve_exit_gap_through_fills_worse():
+    # A bar that GAPS through the stop must fill at the (worse) open, not the stop
+    # level — crediting the exact stop on a gap flatters the backtest.
+    o = np.array([100.0, 97.0]); h = np.array([100.0, 97.5]); l = np.array([100.0, 96.5])
+    px, why = d._resolve_exit(o, h, l, 1, 1, 1, stop=99.0, target=110.0, n=2)
+    _assert(why == "stop" and abs(px - 97.0) < 1e-9,
+            f"gap-through long stop must fill at open 97, got {px}")
+    o2 = np.array([100.0, 103.0]); h2 = np.array([100.0, 103.5]); l2 = np.array([100.0, 102.5])
+    px2, why2 = d._resolve_exit(o2, h2, l2, 1, 1, -1, stop=101.0, target=90.0, n=2)
+    _assert(why2 == "stop" and abs(px2 - 103.0) < 1e-9,
+            f"gap-through short stop must fill at open 103, got {px2}")
+    # a normal intrabar touch (no gap) still fills at the stop level
+    o3 = np.array([100.0, 100.0]); h3 = np.array([100.0, 100.5]); l3 = np.array([100.0, 98.5])
+    px3, why3 = d._resolve_exit(o3, h3, l3, 1, 1, 1, stop=99.0, target=110.0, n=2)
+    _assert(why3 == "stop" and abs(px3 - 99.0) < 1e-9,
+            f"intrabar touch fills at the stop level 99, got {px3}")
+
+
+def test_resolve_exit_applies_stop_slippage():
+    # Stops are market orders and slip against you; targets are limit orders and
+    # do not. Slippage must worsen the stop fill only.
+    o = np.array([100.0, 100.0]); h = np.array([100.0, 100.5]); l = np.array([100.0, 98.5])
+    px, why = d._resolve_exit(o, h, l, 1, 1, 1, stop=99.0, target=110.0, n=2, slip=0.001)
+    _assert(why == "stop" and abs(px - 99.0 * (1 - 0.001)) < 1e-6,
+            f"long stop must slip to 98.901, got {px}")
+    o2 = np.array([100.0, 100.0]); h2 = np.array([100.0, 101.5]); l2 = np.array([100.0, 100.0])
+    px2, why2 = d._resolve_exit(o2, h2, l2, 1, 1, -1, stop=101.0, target=90.0, n=2, slip=0.001)
+    _assert(why2 == "stop" and abs(px2 - 101.0 * (1 + 0.001)) < 1e-6,
+            f"short stop must slip to 101.101, got {px2}")
+    # a target (limit) fill is NOT slipped
+    o3 = np.array([100.0, 100.0]); h3 = np.array([100.0, 110.5]); l3 = np.array([100.0, 100.0])
+    px3, why3 = d._resolve_exit(o3, h3, l3, 1, 1, 1, stop=90.0, target=110.0, n=2, slip=0.001)
+    _assert(why3 == "target" and abs(px3 - 110.0) < 1e-9, f"target not slipped, got {px3}")
+
+
 def test_simulate_process_runs_without_lookahead():
     # The whole feedback loop must run and report an honest verdict on a walk.
     o, h, l, c = _trending_series(220, seed=2)

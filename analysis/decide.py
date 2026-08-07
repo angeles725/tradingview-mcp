@@ -43,6 +43,8 @@ class Config:
     r2_floor: float = 0.30     # trend significance floor
     vr_k: int = 4              # variance-ratio lag for the momentum check
     vr_z: float = 1.645        # min Lo-MacKinlay z for VR>1 to count as momentum
+    cost_bps: float = 1.0      # per-side spread/cost (bps); set to broker/gold reality
+    slip_frac: float = 0.0     # adverse stop slippage as a price fraction (market fills)
     min_rr: float = 1.5        # minimum reward:risk
     stop_k: float = 1.0        # stop distance in cone-sigma (horizon-scaled) units
     risk_frac: float = 0.01    # fraction of equity risked per trade
@@ -110,7 +112,8 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None) -> Stance:
     if edge_override is None:
         rule_sig = bt.rule_ema_trend(o, h, l, c, period=cfg.ema_period,
                                      direction=direction)
-        net, cost = bt.simulate(rule_sig, o, c, cfg.horizon, 1.0, direction=direction)
+        net, cost = bt.simulate(rule_sig, o, c, cfg.horizon, cfg.cost_bps,
+                                direction=direction)
         bstats = bt.compute_stats(net, cost)
         edge_ok = bstats.verdict == "edge"
         b_detail = (f"n={bstats.n}, exp={bstats.expectancy_bps:+.1f}bps, "
@@ -190,6 +193,25 @@ def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=1.0):
             f"expanding edge@{t} dir={direction} {bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)")
 
 
+def _resolve_exit(o, h, l, entry_i, horizon, direction, stop, target, n, slip=0.0):
+    """Walk forward from entry_i and resolve the trade exit. A bar that GAPS
+    through the stop fills at the (worse) OPEN, not the stop level. Stops are
+    MARKET orders and slip against you by `slip` (a price fraction); targets are
+    LIMIT orders and do not slip. Returns (exit_px, reason)."""
+    for k in range(entry_i, min(entry_i + horizon, n)):
+        if direction > 0:
+            if l[k] <= stop:
+                return min(float(o[k]), stop) * (1.0 - slip), "stop"
+            if h[k] >= target:
+                return target, "target"
+        else:
+            if h[k] >= stop:
+                return max(float(o[k]), stop) * (1.0 + slip), "stop"
+            if l[k] <= target:
+                return target, "target"
+    return float(o[min(entry_i + horizon, n - 1)]), "timeout"
+
+
 def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None, times=None):
     n = c.size
     warmup = max(cfg.ema_period, 30) + cfg.horizon
@@ -218,16 +240,9 @@ def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None, times=No
         entry_i = t + 1
         direction = 1 if st.action == "BUY" else -1
         entry_px = o[entry_i]
-        exit_px, exit_reason = None, "timeout"
-        for k in range(entry_i, min(entry_i + cfg.horizon, n)):
-            if direction > 0:
-                if l[k] <= st.stop: exit_px, exit_reason = st.stop, "stop"; break
-                if h[k] >= st.target: exit_px, exit_reason = st.target, "target"; break
-            else:
-                if h[k] >= st.stop: exit_px, exit_reason = st.stop, "stop"; break
-                if l[k] <= st.target: exit_px, exit_reason = st.target, "target"; break
-        if exit_px is None:
-            exit_px = o[min(entry_i + cfg.horizon, n - 1)]
+        exit_px, exit_reason = _resolve_exit(o, h, l, entry_i, cfg.horizon,
+                                             direction, st.stop, st.target, n,
+                                             slip=cfg.slip_frac)
         cost = 2.0 * cost_bps / 1e4
         r = direction * np.log(exit_px / entry_px) - cost
         trades.append((r, exit_reason))
