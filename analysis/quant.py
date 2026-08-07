@@ -713,6 +713,29 @@ def mc_bootstrap(S0: float, returns: np.ndarray, horizon: int,
     return out
 
 
+def mc_block(S0: float, returns: np.ndarray, horizon: int,
+             drift_zero: bool = True, n: int = 20000, seed: int = 7,
+             expected_block: float = 5.0) -> dict:
+    """
+    Horizon cone from the STATIONARY BLOCK bootstrap: like mc_bootstrap but the
+    resampled returns come in contiguous blocks, so the paths inherit serial
+    dependence (momentum/mean-reversion). Wider than the i.i.d. cone under VR>1 —
+    the regime the engine trades — so a stop/target read off THIS cone stays
+    momentum-aware while both barriers share one distribution (consistent R:R).
+    """
+    r = np.asarray(returns, dtype=float)
+    if r.size == 0 or horizon < 1:
+        return {"S0": S0, "model": "block_bootstrap"}
+    if drift_zero:
+        r = r - r.mean()
+    rng = np.random.default_rng(seed)
+    idx = stationary_bootstrap_indices(r.size, horizon, expected_block, n, rng)
+    terminal = S0 * np.exp(r[idx].sum(axis=1))
+    out = _summarize_paths(S0, terminal)
+    out["model"] = "block_bootstrap"
+    return out
+
+
 def mc_student_t(S0: float, returns: np.ndarray, horizon: int,
                  drift_zero: bool = True, n: int = 20000, seed: int = 7) -> dict:
     """

@@ -140,6 +140,34 @@ def test_theilsen_exact_and_subsampled():
     _assert(abs(q.theilsen_slope(y) - 1.0) < 0.2, "median slope stays robust to one outlier")
 
 
+def test_mc_block_wider_than_iid_under_momentum():
+    # positively autocorrelated returns -> block cone must be WIDER than the i.i.d.
+    # cone (persistence inflates horizon dispersion); this is the momentum-aware
+    # distribution both Gate-C barriers now share.
+    rng = np.random.default_rng(0)
+    a = np.zeros(400)
+    for i in range(1, 400):
+        a[i] = 0.6 * a[i - 1] + rng.normal(0.0, 0.01)
+    S0, hz = 100.0, 10
+    iid = q.mc_bootstrap(S0, a, hz)
+    blk = q.mc_block(S0, a, hz)
+    _assert(blk["model"] == "block_bootstrap", "model tag must be block_bootstrap")
+    _assert((blk["P95"] - blk["P5"]) > (iid["P95"] - iid["P5"]),
+            f"block cone must be wider under momentum: {blk['P95'] - blk['P5']} vs {iid['P95'] - iid['P5']}")
+
+
+def test_mc_block_drift_makes_cone_edge_aware():
+    # drift_zero=False must carry the sample drift into the cone (used by Gate C so
+    # the EV reflects the directional edge, not a zero-drift martingale).
+    rng = np.random.default_rng(0)
+    r = 0.002 + rng.normal(0.0, 0.001, 300)          # clear positive drift
+    S0 = 100.0
+    zero = q.mc_block(S0, r, 10, drift_zero=True)
+    drift = q.mc_block(S0, r, 10, drift_zero=False)
+    _assert(abs(zero["P50"] - S0) < S0 * 0.01, "zero-drift cone stays centered near S0")
+    _assert(drift["P50"] > zero["P50"], "positive drift must shift the cone up")
+
+
 def test_bca_ci_symmetric_matches_percentile_and_shifts_on_bias():
     if not q._HAS_SCIPY:
         return

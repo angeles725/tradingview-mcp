@@ -139,7 +139,12 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
     vr_h = q.variance_ratio(ret_raw, cfg.horizon, times=times)
     sigma_h = q.scale_sigma(sigma_bar, cfg.horizon, vr=vr_h)
     entry = float(c[-1])
-    cone = q.mc_bootstrap(entry, ret, cfg.horizon)
+    # The stop is a RISK-CONTROL level (vol-based, VR-aware) — a stop is a chosen
+    # loss tolerance, not a forecast. The TARGET and the EV come from ONE edge-aware
+    # cone: mc_block with drift (Gate A established a significant directional edge)
+    # and momentum (block bootstrap). A zero-drift cone makes every EV ~0 (martingale)
+    # so the engine would never trade; carrying the edge makes the EV honest AND real.
+    cone = q.mc_block(entry, ret, cfg.horizon, drift_zero=False)
     if direction > 0:
         stop = entry * np.exp(-cfg.stop_k * sigma_h)
         target = cone["P75"]
@@ -149,10 +154,10 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
     risk = abs(entry - stop)
     reward = abs(target - entry)
     rr = reward / risk if risk > 0 else 0.0
-    # First-passage EV: RR alone ignores that the stop may be touched FIRST far
-    # more often than the target. Require a favourable RR AND positive expected
-    # value from the barrier-hit probabilities.
-    bp = q.barrier_hit_probabilities(entry, o, h, l, c, cfg.horizon, stop, target, direction)
+    # First-passage EV under the same edge-aware distribution (drift_zero=False):
+    # RR alone ignores that the stop may be touched FIRST more often than the target.
+    bp = q.barrier_hit_probabilities(entry, o, h, l, c, cfg.horizon, stop, target,
+                                     direction, drift_zero=False)
     ev = bp["p_target"] * reward - bp["p_stop"] * risk
     c_ok = rr >= cfg.min_rr and np.isfinite(ev) and ev > 0
     gates.append(asdict(Gate("C_risk_reward", c_ok,

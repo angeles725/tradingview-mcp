@@ -123,8 +123,14 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
 - ~~**S10**~~ **[CERT] DONE 2026-08-07** (VR) — `_return_segments` + `variance_ratio`/`variance_ratio_test` take `times`
   and pool k-sums / autocovariances only WITHIN contiguous sessions; decide passes raw returns + times. Test
   `test_variance_ratio_segments_across_gaps`. GARCH recursion-reset-at-gaps still a further refinement. **M / med**
-- **S11 stop (GARCH-scaled σ) vs target (bootstrap cone quantile) from different vol models → RR is an artifact**
-  (`decide.py:126-139`). Fix: derive both barriers from the same distribution. **S-M / med**
+- ~~**S11**~~ **DONE 2026-08-07 (edge-aware Gate C, user-approved).** Finding: Gate C scored EV on a ZERO-DRIFT
+  cone, ignoring the directional edge Gate A found → EV≈0 martingale (engine only traded via the stop/target
+  model mismatch). Naive "both barriers from one cone" FAILS: under strong drift the cone P25 sits above entry →
+  no definable stop. Sound fix: the STOP stays a vol-based risk-control level (keeps #2/S4), while the TARGET and
+  the EV come from ONE edge-aware cone — `quant.mc_block(..., drift_zero=False)` (drift + block momentum) and
+  `barrier_hit_probabilities(..., drift_zero=False)`. EV now reflects the real edge (positive on a genuine trend)
+  and is internally consistent. Tests `test_mc_block_wider_than_iid_under_momentum`,
+  `test_mc_block_drift_makes_cone_edge_aware`. **S-M / med**
 - ~~**S12**~~ **DONE 2026-08-07** — `_dir_hit` returns None unless `|p_up-0.5|>DIR_EPS(0.03)` and non-tie;
   `calibration` reports `dir_acc`/`dir_n` only over directional records (n/a otherwise); stats print updated.
   Test `test_dir_hit_only_scored_for_directional_cones`. **S / med**
