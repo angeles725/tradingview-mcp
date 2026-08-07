@@ -89,6 +89,19 @@ def test_return_entries_align_with_trades():
     _assert(list(entries) == [4, 11, 21], f"entries misaligned: {list(entries)}")
 
 
+def test_compute_stats_reports_sharpe_psr_drawdown():
+    rng = np.random.default_rng(1)
+    net = rng.normal(0.001, 0.01, 60)
+    s = bt.compute_stats(net)
+    _assert(0.0 <= s.max_drawdown <= 1.0, f"drawdown must be a fraction, got {s.max_drawdown}")
+    _assert(abs(s.sharpe - net.mean() / net.std(ddof=1)) < 1e-9,
+            "sharpe must be per-trade mean/sd")
+    _assert(0.0 <= s.psr <= 1.0 or s.psr != s.psr, f"psr must be a probability, got {s.psr}")
+    # empty input must not crash and reports zeros
+    e = bt.compute_stats(np.array([]))
+    _assert(e.max_drawdown == 0.0 and e.sharpe == 0.0, "empty stats are zero")
+
+
 def test_verdict_uses_block_bootstrap_ci_not_iid():
     # Non-overlapping trades still cluster by regime, so the i.i.d. CI under-covers.
     # The honest serial-dependence-aware block CI must DRIVE the verdict and be the

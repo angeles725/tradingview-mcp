@@ -255,6 +255,77 @@ def variance_ratio(returns: np.ndarray, k: int) -> float:
     return float(vark / (k * var1))
 
 
+def max_drawdown(returns: np.ndarray) -> float:
+    """Maximum peak-to-trough drawdown as a FRACTION, from per-trade log returns.
+    Expectancy hides path risk: two rules with equal mean can have wildly
+    different drawdowns, and drawdown is what ends accounts."""
+    r = np.asarray(returns, dtype=float)
+    if r.size == 0:
+        return 0.0
+    eq = np.cumsum(r)                       # cumulative log return
+    peak = np.maximum.accumulate(eq)
+    dd = 1.0 - np.exp(eq - peak)            # fractional drawdown at each step
+    return float(np.max(dd)) if dd.size else 0.0
+
+
+def probabilistic_sharpe(returns: np.ndarray, benchmark: float = 0.0) -> float:
+    """
+    Bailey-Lopez de Prado Probabilistic Sharpe Ratio: P(true Sharpe > benchmark)
+    given the observed Sharpe, sample size, skew and kurtosis. Unlike the raw
+    Sharpe it penalises short samples and fat left tails, so a lucky high Sharpe
+    on few, skewed trades no longer looks certain. Returns a probability in [0,1].
+    """
+    r = np.asarray(returns, dtype=float)
+    n = r.size
+    if n < 3:
+        return float("nan")
+    sd = r.std(ddof=1)
+    if sd <= 0:
+        return float("nan")
+    sr = r.mean() / sd
+    m = r - r.mean()
+    s2 = float(np.mean(m * m))
+    if s2 <= 0:
+        return float("nan")
+    skew = float(np.mean(m ** 3)) / s2 ** 1.5
+    kurt = float(np.mean(m ** 4)) / (s2 * s2)          # non-excess (normal = 3)
+    denom = 1.0 - skew * sr + ((kurt - 1.0) / 4.0) * sr * sr
+    if denom <= 0 or not np.isfinite(denom):
+        return float("nan")
+    z = (sr - benchmark) * math.sqrt(n - 1) / math.sqrt(denom)
+    return float(stats.norm.cdf(z)) if _HAS_SCIPY else float("nan")
+
+
+def variance_ratio_test(returns: np.ndarray, k: int) -> tuple:
+    """
+    Lo-MacKinlay (1988) variance ratio with the HETEROSKEDASTICITY-ROBUST M2
+    z-statistic. Returns (vr, z, p_two_sided). Under H0 (no serial correlation)
+    z ~ N(0,1); z>0 means VR>1 (momentum), z<0 mean reversion. This is what makes
+    a threshold meaningful: VR=1.01 with z=0.1 is noise, VR=1.01 with z=3 is not.
+    """
+    r = np.asarray(returns, dtype=float)
+    n = r.size
+    if n < k + 1 or k < 2:
+        return (float("nan"), float("nan"), float("nan"))
+    vr = variance_ratio(r, k)
+    d = r - r.mean()
+    d2 = d * d
+    S = float(np.sum(d2))
+    if S <= 0 or not np.isfinite(vr):
+        return (vr, float("nan"), float("nan"))
+    # theta*(k) = sum_{j=1}^{k-1} [2(k-j)/k]^2 * delta_j ,  delta_j = Σ d2_t d2_{t-j} / (Σ d2)^2
+    theta = 0.0
+    for j in range(1, k):
+        delta_j = float(np.sum(d2[j:] * d2[:-j])) / (S * S)
+        w = 2.0 * (k - j) / k
+        theta += (w * w) * delta_j
+    if theta <= 0 or not np.isfinite(theta):
+        return (vr, float("nan"), float("nan"))
+    z = (vr - 1.0) / math.sqrt(theta)
+    p = float(2.0 * (1.0 - stats.norm.cdf(abs(z)))) if _HAS_SCIPY else float("nan")
+    return (float(vr), float(z), p)
+
+
 def classify_regime(closes: np.ndarray, window: int = 20,
                     r2_floor: float = 0.30) -> np.ndarray:
     """

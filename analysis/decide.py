@@ -42,6 +42,7 @@ class Config:
     bars_per_day: int = 96
     r2_floor: float = 0.30     # trend significance floor
     vr_k: int = 4              # variance-ratio lag for the momentum check
+    vr_z: float = 1.645        # min Lo-MacKinlay z for VR>1 to count as momentum
     min_rr: float = 1.5        # minimum reward:risk
     stop_k: float = 1.0        # stop distance in cone-sigma (horizon-scaled) units
     risk_frac: float = 0.01    # fraction of equity risked per trade
@@ -89,16 +90,19 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None) -> Stance:
     ret = q.log_returns(c, times=times)   # gap-aware when timestamps are supplied
     trend = q.ols_trend(c, cfg.r2_floor)
     regime = str(q.classify_regime(c, window=20)[-1])
-    vr = q.variance_ratio(ret, cfg.vr_k)
+    vr, vr_z, _ = q.variance_ratio_test(ret, cfg.vr_k)
     direction = 1 if trend.slope > 0 else -1
     want_regime = "trend-up" if direction > 0 else "trend-down"
 
     # --- Gate A: significant, aligned, momentum-confirmed direction ----------
-    a_ok = trend.significant and regime == want_regime and (vr is not None and vr > 1.0)
+    # Momentum requires VR>1 AND a significant Lo-MacKinlay z — VR=1.01 with z~0
+    # is noise, not a trend to chase.
+    momentum = np.isfinite(vr) and np.isfinite(vr_z) and vr > 1.0 and vr_z >= cfg.vr_z
+    a_ok = trend.significant and regime == want_regime and momentum
     gates.append(asdict(Gate("A_direction", a_ok,
                       f"trend {'sig' if trend.significant else 'NOT sig'} "
                       f"(R^2={trend.r2:.2f}), regime={regime} (want {want_regime}), "
-                      f"VR{cfg.vr_k}={vr:.2f}")))
+                      f"VR{cfg.vr_k}={vr:.2f} (z={vr_z:.2f})")))
     if not a_ok:
         return _no_trade("no defensible direction (Gate A)", gates)
 

@@ -130,6 +130,45 @@ def test_classify_regime_labels_trend_and_chop():
     _assert(np.mean(labels2 == "chop") > 0.7, "noise should be mostly chop")
 
 
+def test_max_drawdown_and_probabilistic_sharpe():
+    # equity rises to +0.2 then a -0.3 return -> peak-to-trough dd = 1-exp(-0.3)
+    r = np.array([0.1, 0.1, -0.3, 0.05])
+    _assert(abs(q.max_drawdown(r) - (1 - math.exp(-0.3))) < 1e-9,
+            f"max_drawdown wrong: {q.max_drawdown(r)}")
+    _assert(q.max_drawdown(np.array([0.01, 0.02, 0.03])) == 0.0,
+            "a monotonically rising equity has zero drawdown")
+    # PSR: a clear positive edge -> ~1; zero-mean noise -> ~0.5
+    rng = np.random.default_rng(0)
+    _assert(q.probabilistic_sharpe(rng.normal(0.02, 0.01, 200)) > 0.95,
+            "clear positive edge should give PSR near 1")
+    # EXACTLY zero sample mean -> observed Sharpe 0 -> PSR = 0.5 deterministically
+    flat = np.array([0.01, -0.01] * 100)
+    psr_flat = q.probabilistic_sharpe(flat)
+    _assert(abs(psr_flat - 0.5) < 1e-9, f"zero-mean sample must give PSR 0.5, got {psr_flat:.3f}")
+
+
+def test_variance_ratio_test_calibrated_and_detects_momentum():
+    # VR>1 alone is not momentum — VR=1.01 is indistinguishable from noise. The
+    # Lo-MacKinlay heteroskedasticity-robust z must be ~N(0,1) on a random walk
+    # (so a significance threshold controls false positives) and large-positive
+    # when returns are genuinely serially correlated.
+    rng = np.random.default_rng(0)
+    zs = []
+    for _ in range(300):
+        _, z, _ = q.variance_ratio_test(rng.normal(0.0, 1.0, 400), 4)
+        zs.append(z)
+    zs = np.array(zs)
+    _assert(abs(zs.mean()) < 0.3, f"random-walk z should center near 0, got {zs.mean():.2f}")
+    fp = float((np.abs(zs) > 1.96).mean())
+    _assert(fp < 0.15, f"random-walk two-sided false-positive rate should be ~5%, got {fp:.2f}")
+    a = np.zeros(400)
+    for i in range(1, 400):
+        a[i] = 0.5 * a[i - 1] + rng.normal(0.0, 1.0)   # positive serial correlation
+    vr, z, p = q.variance_ratio_test(a, 4)
+    _assert(vr > 1.0 and z > 2.0,
+            f"genuine momentum must be VR>1 and significant, got vr={vr:.2f} z={z:.2f}")
+
+
 def test_log_returns_excludes_cross_gap():
     # A session/overnight gap makes one "bar return" a multi-period jump — a fat
     # outlier that inflates sigma and corrupts GARCH/VR. With timestamps, the

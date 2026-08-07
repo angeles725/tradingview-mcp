@@ -88,6 +88,9 @@ class BTStats:
     profit_factor: float       # sum wins / sum |losses|
     t_stat: float              # mean / (std/sqrt(n)) — parametric sanity
     verdict: str               # 'edge' | 'no-edge' | 'thin-sample'
+    sharpe: float = 0.0        # per-trade Sharpe (mean / sd)
+    psr: float = float("nan")  # probabilistic Sharpe vs 0 (skew/kurtosis aware)
+    max_drawdown: float = 0.0  # peak-to-trough equity drawdown (fraction)
 
     def as_dict(self):
         return asdict(self)
@@ -151,8 +154,12 @@ def compute_stats(net, cost=0.0, min_n=30) -> BTStats:
         verdict = "edge"
     else:
         verdict = "no-edge"
+    sharpe = mean / sd if sd > 0 else 0.0
     return BTStats(n, win_rate, mean, mean * 1e4, ci, gross, cost, pf,
-                   float(t_stat), verdict)
+                   float(t_stat), verdict,
+                   sharpe=float(sharpe),
+                   psr=float(q.probabilistic_sharpe(net)),
+                   max_drawdown=float(q.max_drawdown(net)))
 
 
 def walk_forward(signal, o, c, hold, cost, split=0.6, overlap=False):
@@ -245,6 +252,10 @@ def _print(r):
         print(f"  mean 95% CI : [{s['ci95_ret'][0]*1e4:+.2f}, {s['ci95_ret'][1]*1e4:+.2f}] bps   "
               f"t={s['t_stat']:+.2f}")
         print(f"  profit factor: {s['profit_factor']:.2f}")
+        psr = s.get('psr')
+        psr_s = f"{psr:.2f}" if isinstance(psr, (int, float)) and psr == psr else "n/a"
+        print(f"  risk-adjusted: Sharpe {s.get('sharpe', 0.0):+.3f}/trade   "
+              f"PSR(>0) {psr_s}   maxDD {s.get('max_drawdown', 0.0)*100:.1f}%")
 
     block("FULL SAMPLE", r["full"])
     bci = r["block_bootstrap_ci95_bps"]
