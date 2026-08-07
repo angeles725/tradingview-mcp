@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -121,10 +122,48 @@ def score_record(rec: dict, realized_close: float) -> dict:
     return out
 
 
+def _dedupe(records: list) -> list:
+    """Collapse exact duplicate forecasts (same symbol/tf/made_at/horizon); last wins.
+    The hook can record the same window twice, which would double-count coverage."""
+    seen = {}
+    for r in records:
+        key = (r.get("symbol"), r.get("tf"), r.get("made_at_unix"), r.get("horizon_bars"))
+        seen[key] = r
+    return list(seen.values())
+
+
+def _independent_subset(records: list) -> list:
+    """Greedy maximal set of NON-OVERLAPPING [made_at, target] windows (by target).
+    Overlapping forecasts (recorded every few bars with multi-bar horizons) are not
+    independent; this is the effective sample size for an honest coverage CI."""
+    out, last_end = [], None
+    for r in sorted(records, key=lambda x: x["target_unix"]):
+        if last_end is None or r["made_at_unix"] >= last_end:
+            out.append(r)
+            last_end = r["target_unix"]
+    return out
+
+
+def _wilson(k: int, n: int, z: float = 1.96) -> tuple:
+    """Wilson score interval for a proportion — honest at small n and near 0/1."""
+    if n == 0:
+        return (0.0, 1.0)
+    p = k / n
+    denom = 1.0 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return (max(0.0, center - half), min(1.0, center + half))
+
+
 def calibration(records: list) -> dict:
-    """Per-model coverage of the 90%/50% bands over scored records."""
+    """Per-model coverage of the 90%/50% bands over scored records, with an
+    effective-sample Wilson CI on the 90% coverage (overlapping forecasts are not
+    independent, so the plain count overstates the evidence)."""
+    records = _dedupe(records)
     scored = [r for r in records if r.get("realized")]
-    out = {"n_total": len(records), "n_scored": len(scored), "models": {}}
+    indep = _independent_subset(scored)
+    out = {"n_total": len(records), "n_scored": len(scored),
+           "n_eff": len(indep), "models": {}}
     for m in MODELS:
         rows = [r["realized"]["models"][m] for r in scored
                 if m in r["realized"].get("models", {})]
@@ -136,6 +175,12 @@ def calibration(records: list) -> dict:
             "cover_90": sum(x["in_90"] for x in rows) / n,
             "cover_50": sum(x["in_50"] for x in rows) / n,
         }
+        # Honest CI: only the non-overlapping (independent) forecasts count.
+        indep_rows = [r["realized"]["models"][m] for r in indep
+                      if m in r["realized"].get("models", {})]
+        if indep_rows:
+            k90 = sum(x["in_90"] for x in indep_rows)
+            stat["cover_90_ci"] = _wilson(k90, len(indep_rows))
         dh = [x["dir_hit"] for x in rows if x["dir_hit"] is not None]
         if dh:                                # only report direction when scored
             stat["dir_n"] = len(dh)
@@ -219,13 +264,18 @@ def main():
 
     if args.cmd == "stats":
         cal = calibration(read_log(args.log))
-        print(f"forecasts: {cal['n_scored']}/{cal['n_total']} scored  [{args.log}]")
-        print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'pinball':>10}{'dir_acc':>12}")
+        print(f"forecasts: {cal['n_scored']}/{cal['n_total']} scored  "
+              f"(n_eff={cal['n_eff']} non-overlapping)  [{args.log}]")
+        print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'pinball':>10}"
+              f"{'cover90 CI':>16}{'dir_acc':>12}")
         for m, s in cal["models"].items():
             dir_s = f"{s['dir_acc']:.2f} (n={s['dir_n']})" if "dir_acc" in s else "n/a"
             pb_s = f"{s['mean_pinball']:.3f}" if "mean_pinball" in s else "n/a"
+            ci = s.get("cover_90_ci")
+            ci_s = f"[{ci[0]:.2f},{ci[1]:.2f}]" if ci else "n/a"
             print(f"  {m:<14}{s['n']:>5}{s['cover_90']:>9.2f}{s['cover_50']:>9.2f}"
-                  f"{pb_s:>10}{dir_s:>12}")
+                  f"{pb_s:>10}{ci_s:>16}{dir_s:>12}")
+        print("  -> cover90 CI uses n_eff (independent forecasts); wide until n_eff grows.")
         print("  -> lower pinball = better-shaped cone (ranks the three models).")
         print("  -> cover90 should trend to ~0.90 and cover50 to ~0.50 if the cone")
         print("     is well-calibrated; persistently low coverage = vol underestimated.")

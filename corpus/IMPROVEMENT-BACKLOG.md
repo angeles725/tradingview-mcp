@@ -113,8 +113,9 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
 - ~~**S6**~~ **DONE 2026-08-07** — `forecast.pit` (piecewise-linear CDF from the 5 quantiles) and
   `forecast.pinball_loss` (strictly-proper quantile loss); `score_record` stores per-model `pit`/`pinball`;
   `calibration` + `stats` report `mean_pinball` to rank the cones. Test `test_pit_and_pinball_scoring_rules`. **M / med-high**
-- **S7 overlapping forecasts treated as i.i.d.** — hook records h=4 every 30m; coverage averaged as independent →
-  effective-n far below n, CI absent. Fix: non-overlapping records or Wilson CI on effective-n; dedupe. **S-M / med-high**
+- ~~**S7**~~ **DONE 2026-08-07** — `_dedupe` (by symbol/tf/made_at/horizon), `_independent_subset` (greedy
+  non-overlapping → `n_eff`), `_wilson`; `calibration` reports `n_eff` and a `cover_90_ci` over the independent
+  subset; `stats` shows both. Test `test_dedupe_effective_n_and_wilson`. **S-M / med-high**
 - ~~**S8**~~ **[CERT] DONE 2026-08-07** — `_position_size` caps size at `max_leverage*equity/entry` (Config.max_leverage=10);
   when the cap binds, reported `risk_cash = size*risk`. Test `test_position_size_leverage_cap`. (fractional Kelly still optional) **S-M / med-high**
 - ~~**S9**~~ **[CERT] DONE 2026-08-07** — `barrier_hit_probabilities` now draws paths via `stationary_bootstrap_indices`

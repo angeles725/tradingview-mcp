@@ -51,6 +51,30 @@ def test_score_record_band_hits():
     _assert(s2["realized"]["models"]["student_t"]["in_90"], "106 inside student_t 90%")
 
 
+def test_dedupe_effective_n_and_wilson():
+    # exact duplicates (same symbol/tf/made/horizon) must collapse
+    r1 = fc.score_record(fc.build_record(_report()), 100.0)
+    r1b = fc.score_record(fc.build_record(_report()), 101.0)
+    cal = fc.calibration([r1, r1b])
+    _assert(cal["n_scored"] == 1, f"exact duplicates must collapse, got {cal['n_scored']}")
+
+    def mk(made, tgt):
+        rec = fc.build_record(_report())
+        rec["made_at_unix"] = made
+        rec["target_unix"] = tgt
+        return fc.score_record(rec, 100.0)
+
+    recs = [mk(0, 100), mk(50, 150), mk(200, 300)]     # first two overlap, third separate
+    cal2 = fc.calibration(recs)
+    _assert(cal2["n_scored"] == 3 and cal2["n_eff"] == 2,
+            f"effective n should be 2 non-overlapping, got {cal2['n_eff']}")
+    _assert("cover_90_ci" in cal2["models"]["gaussian"], "must report a coverage CI")
+    # Wilson interval sanity
+    lo, hi = fc._wilson(5, 10)
+    _assert(lo < 0.5 < hi and 0.0 <= lo and hi <= 1.0, "Wilson brackets 0.5 at 5/10")
+    _assert((fc._wilson(5, 5)[1] - fc._wilson(5, 5)[0]) > (hi - lo) - 1.0, "n=5 CI is wide")
+
+
 def test_pit_and_pinball_scoring_rules():
     lv = [0.05, 0.25, 0.5, 0.75, 0.95]
     vals = [90.0, 95.0, 100.0, 105.0, 110.0]
@@ -79,11 +103,15 @@ def test_dir_hit_only_scored_for_directional_cones():
     for m in fc.MODELS:
         _assert(s["realized"]["models"][m]["dir_hit"] is None,
                 f"{m}: a ~0.5 p_up must not be scored for direction")
-    # a genuinely directional cone (p_up=0.7) IS scored
-    rec2 = fc.build_record(_report())
-    rec2["cones"]["gaussian"]["p_up"] = 0.7
-    up = fc.score_record(rec2, 105.0)         # up + bullish -> hit
-    dn = fc.score_record(rec2, 95.0)          # down + bullish -> miss
+    # a genuinely directional cone (p_up=0.7) IS scored — distinct made_at so the
+    # two records are NOT deduped into one
+    def mk_dir(made, y):
+        r = fc.build_record(_report())
+        r["cones"]["gaussian"]["p_up"] = 0.7
+        r["made_at_unix"] = made; r["target_unix"] = made + 3600
+        return fc.score_record(r, y)
+    up = mk_dir(0, 105.0)         # up + bullish -> hit
+    dn = mk_dir(4000, 95.0)       # down + bullish -> miss
     _assert(up["realized"]["models"]["gaussian"]["dir_hit"] is True, "up+bullish must hit")
     _assert(dn["realized"]["models"]["gaussian"]["dir_hit"] is False, "down+bullish must miss")
     cal = fc.calibration([up, dn, s])
@@ -93,10 +121,13 @@ def test_dir_hit_only_scored_for_directional_cones():
 
 
 def test_calibration_counts_coverage():
-    rec = fc.build_record(_report())
-    recs = [fc.score_record(rec, 100.0),   # dead center: in all bands
-            fc.score_record(rec, 103.0),   # in 90 for g/b, out of their 50
-            dict(rec)]                      # unscored (realized None)
+    def mk(made, y=None):
+        rec = fc.build_record(_report())
+        rec["made_at_unix"] = made; rec["target_unix"] = made + 3600
+        return fc.score_record(rec, y) if y is not None else rec
+    recs = [mk(0, 100.0),        # dead center: in all bands
+            mk(4000, 103.0),     # in 90 for g/b, out of their 50
+            mk(8000)]            # unscored (realized None)
     cal = fc.calibration(recs)
     _assert(cal["n_total"] == 3 and cal["n_scored"] == 2, "counts")
     g = cal["models"]["gaussian"]
