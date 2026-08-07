@@ -75,6 +75,22 @@ def test_dedupe_effective_n_and_wilson():
     _assert((fc._wilson(5, 5)[1] - fc._wilson(5, 5)[0]) > (hi - lo) - 1.0, "n=5 CI is wide")
 
 
+def test_pinball_bps_is_scale_invariant():
+    # raw pinball is in PRICE units (BTC ~42 vs gold ~3 vs EURUSD ~0) -> not
+    # comparable across symbols. pinball_bps normalizes by S0 so the SAME relative
+    # move scores identically at any price level.
+    s1 = fc.score_record(fc.build_record(_report()), 103.0)          # S0=100
+    big = _report(); big["last_price"] = 10000.0
+    for m in big["monte_carlo"].values():
+        for k in ("P5", "P25", "P50", "P75", "P95"):
+            m[k] *= 100.0
+    s2 = fc.score_record(fc.build_record(big), 10300.0)              # S0=10000, same relative
+    pb1 = s1["realized"]["models"]["gaussian"]["pinball_bps"]
+    pb2 = s2["realized"]["models"]["gaussian"]["pinball_bps"]
+    _assert(abs(pb1 - pb2) < 1e-6, f"pinball_bps must be scale-invariant: {pb1} vs {pb2}")
+    _assert(pb1 > 0, "pinball_bps positive off the quantiles")
+
+
 def test_pit_and_pinball_scoring_rules():
     lv = [0.05, 0.25, 0.5, 0.75, 0.95]
     vals = [90.0, 95.0, 100.0, 105.0, 110.0]

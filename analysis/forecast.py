@@ -141,6 +141,9 @@ def score_record(rec: dict, realized_close: float) -> dict:
             "dir_hit": _dir_hit(realized_close, S0, c["p_up"]),
             "pit": pit(QUANTILE_LEVELS, qv, realized_close),
             "pinball": pinball_loss(QUANTILE_LEVELS, qv, realized_close),
+            # normalized to bps of S0 so pinball is comparable across symbols/prices
+            "pinball_bps": (pinball_loss(QUANTILE_LEVELS, qv, realized_close) / S0 * 1e4)
+                           if S0 else float("nan"),
         }
     out = dict(rec)
     out["realized"] = realized
@@ -213,6 +216,10 @@ def calibration(records: list) -> dict:
         pb = [x["pinball"] for x in rows if "pinball" in x]
         if pb:                                # strictly-proper score for ranking
             stat["mean_pinball"] = sum(pb) / len(pb)
+        pbb = [x["pinball_bps"] for x in rows if x.get("pinball_bps") == x.get("pinball_bps")
+               and "pinball_bps" in x]
+        if pbb:                               # bps-normalized -> comparable across symbols
+            stat["mean_pinball_bps"] = sum(pbb) / len(pbb)
         out["models"][m] = stat
     return out
 
@@ -322,17 +329,17 @@ def main():
         cal = calibration(read_log(args.log))
         print(f"forecasts: {cal['n_scored']}/{cal['n_total']} scored  "
               f"(n_eff={cal['n_eff']} non-overlapping)  [{args.log}]")
-        print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'pinball':>10}"
+        print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'pinball_bps':>12}"
               f"{'cover90 CI':>16}{'dir_acc':>12}")
         for m, s in cal["models"].items():
             dir_s = f"{s['dir_acc']:.2f} (n={s['dir_n']})" if "dir_acc" in s else "n/a"
-            pb_s = f"{s['mean_pinball']:.3f}" if "mean_pinball" in s else "n/a"
+            pb_s = f"{s['mean_pinball_bps']:.1f}" if "mean_pinball_bps" in s else "n/a"
             ci = s.get("cover_90_ci")
             ci_s = f"[{ci[0]:.2f},{ci[1]:.2f}]" if ci else "n/a"
             print(f"  {m:<14}{s['n']:>5}{s['cover_90']:>9.2f}{s['cover_50']:>9.2f}"
-                  f"{pb_s:>10}{ci_s:>16}{dir_s:>12}")
+                  f"{pb_s:>12}{ci_s:>16}{dir_s:>12}")
         print("  -> cover90 CI uses n_eff (independent forecasts); wide until n_eff grows.")
-        print("  -> lower pinball = better-shaped cone (ranks the three models).")
+        print("  -> lower pinball_bps = better-shaped cone, comparable across symbols/horizons.")
         print("  -> cover90 should trend to ~0.90 and cover50 to ~0.50 if the cone")
         print("     is well-calibrated; persistently low coverage = vol underestimated.")
 

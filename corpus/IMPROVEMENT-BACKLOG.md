@@ -130,6 +130,17 @@ help on gold 15m; simpler is better here. Backfill logs are regenerable backtest
 - **Method gap found:** pinball loss is in PRICE units (BTC ~42, gold ~3, EURUSD ~0.000) → NOT comparable across
   symbols/horizons. Normalize (per S0 / in bps) for cross-symbol model ranking. *(new method item)*
 
+## Post-audit tooling (Tasks #2/#4 + method, 2026-08-07)
+- **Realized-coverage reporting (Task #2, DONE):** `forecast.coverage_table` + `forecast.py calibrate` →
+  `calibration.json`; `analyze.py --calibration` annotates the cone with its measured 90%/50% coverage for the
+  symbol/horizon (honest — never changes the model).
+- **Pinball normalization (method, DONE):** raw pinball is in PRICE units (gold 7.4 vs EURUSD 1.2 vs BTC 6.5 bps
+  when normalized; raw was 3/0/42 — meaningless). `score_record` now also stores `pinball_bps` (per S0); `stats`
+  ranks cones by `mean_pinball_bps`, comparable across symbols/horizons. Test `test_pinball_bps_is_scale_invariant`.
+- **Multi-symbol accumulation (Task #4, DONE):** `collect-hook.sh` takes a `SYMBOLS` array (default just gold →
+  unchanged); with >1 it cycles the chart per symbol (settle+pull+collect+record+score) and restores the primary.
+  Builds live calibration across instruments. Opt-in, non-intrusive by default.
+
 ## Adaptive-vol investigation (Task #3, 2026-08-07 — NO CHANGE warranted)
 Tested whether a better/adaptive horizon vol fixes the under-coverage. Out-of-sample (validate) cover90 of a
 gaussian cone, close-to-close (EWMA) vs Garman-Klass RANGE vol:

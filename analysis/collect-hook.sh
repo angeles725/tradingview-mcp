@@ -22,7 +22,10 @@ set -uo pipefail
 # so it is not tied to a hardcoded path.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SYMBOL="OANDA:XAUUSD"
+# Symbols to accumulate each tick. DEFAULT is one (gold) — behaviour unchanged.
+# Add more to build calibration across instruments; with >1 symbol the detached
+# job briefly cycles the live chart and restores the FIRST (primary) at the end.
+SYMBOLS=("OANDA:XAUUSD")
 TF="15"
 THROTTLE_MIN=30
 HORIZON=4          # forecast horizon in bars (4 x 15m = next hour)
@@ -55,20 +58,28 @@ fi
 # Both gates passed. Stamp now (so a slow/failed pull still respects the throttle)
 # and launch the collection DETACHED — the hook returns instantly.
 touch "$STAMP"
+SYMS="${SYMBOLS[*]}"
 nohup bash -c "
   cd '$PROJECT' || exit 0
-  PULL=\$(mktemp)
-  '$NODE' src/cli/index.js ohlcv --count 300 >\"\$PULL\" 2>>'$LOG'
-  # (a) accumulate history
-  '$PY' analysis/collect.py --symbol '$SYMBOL' --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
-  # (b) record a next-hour forecast (cone from analyze; gap-aware)
-  '$PY' analysis/analyze.py --symbol '$SYMBOL' --tf '$TF' --horizon '$HORIZON' --json <\"\$PULL\" 2>>'$LOG' \
-    | '$PY' analysis/forecast.py record >>'$LOG' 2>&1
-  # (c) score matured forecasts against the accumulated store
-  '$PY' analysis/collect.py --symbol '$SYMBOL' --tf '$TF' --emit 2>>'$LOG' \
-    | '$PY' analysis/forecast.py score >>'$LOG' 2>&1
-  rm -f \"\$PULL\"
-  echo \"[\$(date '+%F %T')] collect+forecast tick done\" >>'$LOG'
+  syms=($SYMS)
+  primary=\${syms[0]}
+  multi=0; [ \${#syms[@]} -gt 1 ] && multi=1
+  for sym in \"\${syms[@]}\"; do
+    # switch the chart only when accumulating >1 symbol; let it settle before pull
+    if [ \$multi -eq 1 ]; then '$NODE' src/cli/index.js symbol \"\$sym\" >>'$LOG' 2>&1; sleep 3; fi
+    PULL=\$(mktemp)
+    '$NODE' src/cli/index.js ohlcv --count 300 >\"\$PULL\" 2>>'$LOG'
+    # (a) accumulate history  (b) record a next-hour forecast  (c) score matured
+    '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
+    '$PY' analysis/analyze.py --symbol \"\$sym\" --tf '$TF' --horizon '$HORIZON' --json <\"\$PULL\" 2>>'$LOG' \
+      | '$PY' analysis/forecast.py record >>'$LOG' 2>&1
+    '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' --emit 2>>'$LOG' \
+      | '$PY' analysis/forecast.py score >>'$LOG' 2>&1
+    rm -f \"\$PULL\"
+  done
+  # restore the primary chart if we cycled symbols
+  [ \$multi -eq 1 ] && '$NODE' src/cli/index.js symbol \"\$primary\" >>'$LOG' 2>&1
+  echo \"[\$(date '+%F %T')] collect+forecast tick done (\${#syms[@]} sym)\" >>'$LOG'
 " >/dev/null 2>&1 &
 
 exit 0
