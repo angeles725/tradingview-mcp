@@ -143,6 +143,16 @@ def test_nearest_close_within_tolerance():
     _assert(fc.nearest_close(bars, 9999, 450) is None, "no bar within tolerance")
 
 
+def test_coverage_table_groups_by_symbol_horizon():
+    r1 = fc.score_record(fc.build_record(_report()), 100.0)          # XAUUSD|15|4
+    r2 = fc.build_record(_report()); r2["symbol"] = "EURUSD"; r2["made_at_unix"] = 999
+    r2 = fc.score_record(r2, 100.0)
+    tbl = fc.coverage_table([r1, r2])
+    _assert("XAUUSD|15|4" in tbl and "EURUSD|15|4" in tbl, "grouped by symbol|tf|horizon")
+    g = tbl["XAUUSD|15|4"]["gaussian"]
+    _assert("cover_90" in g and "cover_50" in g and g["n"] == 1, "per-group coverage")
+
+
 def test_lock_context_manager_guards_ops():
     # score does a read-modify-write of the whole log; concurrent hook jobs must
     # not clobber it. _lock must be a usable context manager and ops under it work.

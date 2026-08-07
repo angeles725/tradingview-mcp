@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import numpy as np
@@ -87,6 +88,9 @@ def main():
     ap.add_argument("--rsi-period", type=int, default=14)
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--calibration", default=None,
+                    help="path to a forecast calibration.json; annotates the cone "
+                         "with the band's REALIZED coverage for this symbol/horizon")
     args = ap.parse_args()
 
     data = load_bars(sys.stdin)
@@ -176,6 +180,18 @@ def main():
         },
     }
 
+    # Honest calibration annotation: what the nominal cone bands ACTUALLY covered
+    # for this symbol/horizon (coverage is symbol/regime-specific). Never changes
+    # the cone — just tells the reader how to trust it.
+    if args.calibration and os.path.exists(args.calibration):
+        try:
+            tbl = json.load(open(args.calibration))
+        except (ValueError, OSError):
+            tbl = {}
+        entry = tbl.get(f"{args.symbol}|{args.tf}|{args.horizon}")
+        if entry:
+            report["realized_coverage"] = entry
+
     if args.json:
         print(json.dumps(report, indent=2))
         return
@@ -239,6 +255,12 @@ def _print_human(r):
               f"{m['P75']:>10.2f}{m['P95']:>10.2f}{m['p_up']:>8.2f}")
     print("  -> deliver the BAND (e.g. 90% inside P5..P95), never the median.")
     print("  -> if bootstrap/t P5..P95 is WIDER than gaussian, tails are fat: size down.")
+    rc = r.get("realized_coverage")
+    if rc and "bootstrap" in rc:
+        b = rc["bootstrap"]
+        print(f"  -> REALIZED coverage here (n={b['n']}): nominal 90% band held "
+              f"{b['cover_90']*100:.0f}%, 50% band {b['cover_50']*100:.0f}% "
+              f"(read the band at its measured coverage).")
 
     corr = r.get("conditionals_correction", {})
     print(f"\nCONDITIONAL P(next bar up)   baseline = {r['baseline_next_up']:.3f}")

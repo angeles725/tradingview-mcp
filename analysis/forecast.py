@@ -217,6 +217,25 @@ def calibration(records: list) -> dict:
     return out
 
 
+def coverage_table(records: list) -> dict:
+    """Realized coverage grouped by 'symbol|tf|horizon' — the honest lookup that
+    lets a live forecast report what its nominal band ACTUALLY covered for this
+    instrument/horizon (calibration is symbol- and regime-specific, per the
+    cross-symbol evidence). Keyed string -> {model: {cover_90, cover_50, n}}."""
+    groups: dict = {}
+    for r in records:
+        if not r.get("realized"):
+            continue
+        key = f"{r.get('symbol')}|{r.get('tf')}|{r.get('horizon_bars')}"
+        groups.setdefault(key, []).append(r)
+    out = {}
+    for key, recs in groups.items():
+        cal = calibration(recs)
+        out[key] = {m: {"cover_90": s["cover_90"], "cover_50": s["cover_50"], "n": s["n"]}
+                    for m, s in cal["models"].items()}
+    return out
+
+
 def nearest_close(bars: list, target_unix: int, tol: int) -> float | None:
     """Close of the bar whose time is closest to target_unix within tol, else None."""
     best, best_d = None, None
@@ -259,9 +278,19 @@ def _bars_from_stdin() -> list:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["record", "score", "stats"])
+    ap.add_argument("cmd", choices=["record", "score", "stats", "calibrate"])
     ap.add_argument("--log", default=DEFAULT_LOG)
+    ap.add_argument("--out", default=os.path.join(os.path.dirname(DEFAULT_LOG), "calibration.json"),
+                    help="calibrate: where to write the coverage table")
     args = ap.parse_args()
+
+    if args.cmd == "calibrate":
+        tbl = coverage_table(read_log(args.log))
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+        with open(args.out, "w") as f:
+            json.dump(tbl, f, indent=2)
+        print(f"calibration table: {len(tbl)} symbol/horizon group(s) -> {args.out}")
+        return
 
     if args.cmd == "record":
         report = json.load(sys.stdin)
