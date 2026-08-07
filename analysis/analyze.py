@@ -137,7 +137,11 @@ def main():
     regime_now = str(regime_labels[-1])
     uniq, counts = np.unique(regime_labels, return_counts=True)
     regime_mix = {str(k): int(v) for k, v in zip(uniq, counts)}
-    vr = {k: q.variance_ratio(ret, k) for k in (2, 4, 8)}
+    # Route the displayed VR through the SAME segmented path decide.py acts on
+    # (raw returns + timestamps), so what the user reads matches what the engine
+    # gates on, and gaps are handled by variance_ratio's own segmentation.
+    ret_raw = q.log_returns(c)
+    vr = {k: q.variance_ratio(ret_raw, k, times=times) for k in (2, 4, 8)}
 
     # --- Conditional probabilities ---------------------------------------
     baseline = float(np.mean(np.diff(c) > 0))

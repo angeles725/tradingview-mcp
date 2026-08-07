@@ -333,10 +333,16 @@ def variance_ratio(returns: np.ndarray, k: int, times=None, gap_tol: float = 2.0
     n = r.size
     if n < k + 1 or k < 1:
         return float("nan")
-    var1 = np.var(r, ddof=1)
+    segs = _return_segments(times, gap_tol) if times is not None else None
+    # var1 (denominator) must be measured over the SAME within-session population
+    # as the k-sum numerator; including the excluded cross-gap returns would
+    # inflate var1 and deflate VR on gapped instruments.
+    seg_r = np.concatenate([r[s:e] for s, e in segs]) if segs is not None else r
+    if seg_r.size < 2:
+        return float("nan")
+    var1 = np.var(seg_r, ddof=1)
     if var1 == 0:
         return float("nan")
-    segs = _return_segments(times, gap_tol) if times is not None else None
     ksum = _ksums(r, k, segs)
     if ksum.size < 2:
         return float("nan")
@@ -450,12 +456,18 @@ def variance_ratio_test(returns: np.ndarray, k: int, times=None,
     if n < k + 1 or k < 2:
         return (float("nan"), float("nan"), float("nan"))
     vr = variance_ratio(r, k, times=times, gap_tol=gap_tol)
-    d = r - r.mean()
-    d2 = d * d
-    S = float(np.sum(d2))
-    if S <= 0 or not np.isfinite(vr):
+    segs = _return_segments(times, gap_tol) if times is not None else [(0, r.size)]
+    # Demean and normalise over within-session returns only (the same population
+    # the segmented autocovariance sums use); the excluded cross-gap returns must
+    # not enter the mean or S, or they contaminate the z-statistic.
+    seg_r = np.concatenate([r[s:e] for s, e in segs]) if segs else np.empty(0)
+    if seg_r.size < 2 or not np.isfinite(vr):
         return (vr, float("nan"), float("nan"))
-    segs = _return_segments(times, gap_tol) if times is not None else [(0, d2.size)]
+    d = r - seg_r.mean()                       # aligned to r for segment slicing
+    d2 = d * d
+    S = float(np.sum([float(np.sum(d2[s:e])) for s, e in segs]))
+    if S <= 0:
+        return (vr, float("nan"), float("nan"))
     # theta*(k) = sum_{j=1}^{k-1} [2(k-j)/k]^2 * delta_j ,  delta_j = Σ d2_t d2_{t-j} / (Σ d2)^2
     # with the lagged products summed only WITHIN each contiguous segment.
     theta = 0.0

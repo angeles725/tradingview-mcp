@@ -307,6 +307,30 @@ def test_variance_ratio_segments_across_gaps():
     _assert(not math.isnan(vr), "segmented VR test must be computable")
 
 
+def test_variance_ratio_denominator_is_within_session():
+    # The gap-boundary return (index 4 below) is excluded from the segmented
+    # k-sum numerator; it MUST also be excluded from the 1-bar variance
+    # denominator. Otherwise a large overnight/session gap inflates var1 and
+    # DEFLATES VR on gapped instruments — understating horizon sigma, which
+    # tightens the stop and oversizes the position (risk-increasing).
+    r = np.array([0.01, -0.01, 0.012, -0.011, 0.5, 0.01, -0.01, 0.012])
+    times = np.array([0, 60, 120, 180, 240, 100000, 100060, 100120, 100180])
+    segs = q._return_segments(times, gap_tol=2.0)
+    _assert(segs == [(0, 4), (5, 8)], f"expected gap split, got {segs}")
+    # r[4] is the excluded gap return; its magnitude must not move VR.
+    vr_big = q.variance_ratio(r, 2, times=times)
+    r_small = r.copy()
+    r_small[4] = 0.0
+    vr_small = q.variance_ratio(r_small, 2, times=times)
+    _assert(math.isclose(vr_big, vr_small, rel_tol=1e-12),
+            f"excluded gap return must not affect segmented VR: {vr_big} vs {vr_small}")
+    # the heteroskedasticity-robust VR test must be equally invariant.
+    vr_bt, _, _ = q.variance_ratio_test(r, 2, times=times)
+    vr_st, _, _ = q.variance_ratio_test(r_small, 2, times=times)
+    _assert(math.isclose(vr_bt, vr_st, rel_tol=1e-12),
+            f"excluded gap return must not affect VR test: {vr_bt} vs {vr_st}")
+
+
 def test_variance_ratio_test_calibrated_and_detects_momentum():
     # VR>1 alone is not momentum — VR=1.01 is indistinguishable from noise. The
     # Lo-MacKinlay heteroskedasticity-robust z must be ~N(0,1) on a random walk
