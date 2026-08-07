@@ -162,12 +162,23 @@ def compute_stats(net, cost=0.0, min_n=30) -> BTStats:
                    max_drawdown=float(q.max_drawdown(net)))
 
 
-def walk_forward(signal, o, c, hold, cost, split=0.6, overlap=False):
-    """Split the timeline; report in-sample vs out-of-sample expectancy."""
+def walk_forward(signal, o, c, hold, cost, split=0.6, overlap=False, embargo=None):
+    """In-sample vs out-of-sample expectancy with a PURGE + EMBARGO at the split.
+
+    Without purging, a signal firing within `hold` bars before the cut opens a
+    trade that exits AFTER the cut — an in-sample trade that reads out-of-sample
+    bars (leakage). We (1) PURGE in-sample signals whose whole trade window would
+    cross the cut, and (2) EMBARGO the first `embargo` bars after the cut from the
+    out-of-sample set, so information does not straddle the boundary.
+    """
     n = o.size
     cut = int(n * split)
-    is_sig = signal.copy(); is_sig[cut:] = False
-    oos_sig = signal.copy(); oos_sig[:cut] = False
+    if embargo is None:
+        embargo = hold
+    sig = np.asarray(signal, dtype=bool)
+    idx = np.arange(n)
+    is_sig = sig & (idx + 1 + hold < cut)      # trade fully before the cut
+    oos_sig = sig & (idx >= cut + embargo)     # start strictly after the embargo
     cost_bps = cost / 2 * 1e4
     is_net, _ = simulate(is_sig, o, c, hold, cost_bps, overlap=overlap)
     oos_net, _ = simulate(oos_sig, o, c, hold, cost_bps, overlap=overlap)

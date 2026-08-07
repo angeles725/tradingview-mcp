@@ -212,22 +212,59 @@ def stationary_bootstrap_indices(n: int, m: int, expected_block: float,
     return out
 
 
+def bca_ci(boot: np.ndarray, theta_hat: float, jackknife: np.ndarray,
+           alpha: float = 0.05) -> tuple:
+    """
+    BCa (bias-corrected accelerated) interval endpoints from bootstrap replicates
+    `boot`, the point estimate `theta_hat`, and leave-one-out `jackknife` values.
+    The plain percentile bootstrap UNDER-covers for skewed statistics (per-trade
+    P&L is skewed/fat-tailed); BCa corrects for median bias (z0) and skewness
+    (acceleration a). Falls back to plain percentiles without scipy.
+    """
+    b = np.asarray(boot, dtype=float)
+    if b.size == 0:
+        return (float("nan"), float("nan"))
+    if not _HAS_SCIPY:
+        lo, hi = np.percentile(b, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+        return (float(lo), float(hi))
+    prop = float(np.clip(np.mean(b < theta_hat), 1e-6, 1 - 1e-6))
+    z0 = stats.norm.ppf(prop)
+    j = np.asarray(jackknife, dtype=float)
+    diff = j.mean() - j
+    s2 = float(np.sum(diff ** 2))
+    a = float(np.sum(diff ** 3) / (6.0 * s2 ** 1.5)) if s2 > 0 else 0.0
+
+    def _pct(z):
+        val = z0 + (z0 + z) / (1.0 - a * (z0 + z))
+        return 100.0 * float(stats.norm.cdf(val))
+
+    lo, hi = np.percentile(b, [_pct(stats.norm.ppf(alpha / 2)),
+                               _pct(stats.norm.ppf(1 - alpha / 2))])
+    return (float(lo), float(hi))
+
+
 def bootstrap_mean_ci_block(x: np.ndarray, expected_block: float = 10.0,
                             n_boot: int = 5000, alpha: float = 0.05,
                             seed: int = 7) -> tuple:
     """
-    Stationary-bootstrap CI for the mean of a SERIALLY DEPENDENT series. Wider
-    (more honest) than the i.i.d. CI when the data are autocorrelated, because
-    it does not pretend neighbouring samples are independent.
+    Stationary-bootstrap CI for the mean of a SERIALLY DEPENDENT series, with a
+    BCa correction. Wider (more honest) than the i.i.d. CI when the data are
+    autocorrelated — it does not pretend neighbouring samples are independent —
+    and BCa additionally corrects the skew/median-bias under-coverage of the
+    plain percentile interval.
     """
     x = np.asarray(x, dtype=float)
-    if x.size == 0:
+    n = x.size
+    if n == 0:
         return (float("nan"), float("nan"))
     rng = np.random.default_rng(seed)
-    idx = stationary_bootstrap_indices(x.size, x.size, expected_block, n_boot, rng)
+    idx = stationary_bootstrap_indices(n, n, expected_block, n_boot, rng)
     means = x[idx].mean(axis=1)
-    lo, hi = np.percentile(means, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return (float(lo), float(hi))
+    if not _HAS_SCIPY or n < 3:
+        lo, hi = np.percentile(means, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+        return (float(lo), float(hi))
+    jack = (n * x.mean() - x) / (n - 1)          # leave-one-out jackknife of the mean
+    return bca_ci(means, float(x.mean()), jack, alpha)
 
 
 # --------------------------------------------------------------------------- #

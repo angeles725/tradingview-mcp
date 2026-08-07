@@ -89,6 +89,21 @@ def test_return_entries_align_with_trades():
     _assert(list(entries) == [4, 11, 21], f"entries misaligned: {list(entries)}")
 
 
+def test_walk_forward_purges_boundary_trades():
+    # A signal firing just before the split opens a trade that exits AFTER the
+    # split — an in-sample trade using out-of-sample bars. Purge must drop it.
+    n = 100
+    o = np.arange(10, 10 + n, dtype=float)
+    c = o + 0.5
+    signal = np.zeros(n, dtype=bool)
+    signal[58] = True     # entry 59, exit 64 -> crosses cut=60: must be PURGED from IS
+    signal[10] = True     # clean in-sample trade
+    signal[80] = True     # clean out-of-sample trade
+    is_s, oos_s = bt.walk_forward(signal, o, c, hold=5, cost=0.0, split=0.6, embargo=5)
+    _assert(is_s.n == 1, f"boundary-crossing IS trade must be purged, got IS n={is_s.n}")
+    _assert(oos_s.n == 1, f"OOS should keep the clean bar 80, got n={oos_s.n}")
+
+
 def test_compute_stats_reports_sharpe_psr_drawdown():
     rng = np.random.default_rng(1)
     net = rng.normal(0.001, 0.01, 60)

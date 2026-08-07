@@ -108,6 +108,21 @@ def test_stationary_bootstrap_preserves_contiguity():
             f"large blocks should be mostly contiguous, got {frac_contiguous:.2f}")
 
 
+def test_bca_ci_symmetric_matches_percentile_and_shifts_on_bias():
+    if not q._HAS_SCIPY:
+        return
+    rng = np.random.default_rng(0)
+    boot = rng.normal(0.0, 1.0, 20000)
+    jack = np.array([-1.0, 1.0] * 50)                 # symmetric -> acceleration 0
+    lo, hi = q.bca_ci(boot, 0.0, jack)
+    plo, phi = np.percentile(boot, [2.5, 97.5])
+    _assert(abs(lo - plo) < 0.06 and abs(hi - phi) < 0.06,
+            f"symmetric BCa should match the percentile CI: {(lo, hi)} vs {(plo, phi)}")
+    # a point estimate above the bootstrap centre -> positive z0 shifts both ends up
+    lo2, hi2 = q.bca_ci(boot, 0.5, jack)
+    _assert(lo2 > lo and hi2 > hi, "positive bias correction must shift the interval up")
+
+
 def test_block_ci_wider_than_iid_on_autocorrelated():
     rng = np.random.default_rng(9)
     x = np.empty(500)
