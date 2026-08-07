@@ -221,6 +221,63 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
 No-lookahead fills; BH-FDR multiple testing; Wilson + Politis-Romano block + BCa CI machinery; `valid_ohlc` +
 atomic store writes.
 
+## Third-pass audit (2026-08-07, after the second-pass 16 items)
+Fresh findings NOT in any DONE row above. Delegated adversarial re-derivation of the decision-critical numerics
+(scipy venv), then source-confirmed each survivor. One NEW **HIGH** bug the first two passes missed — gold,
+their test bed, has a near-24h session so its negligible gaps never surfaced it — plus three minor items. All
+fixed, strict TDD. Commits `80bca3f` (T1+T2), `47daa1f` (T3+T4). Suite 77→79. The prior 36 findings re-verified
+as genuinely resolved.
+
+### P1 — correctness bug biasing the decision
+- ~~**T1**~~ **[CERT] DONE 2026-08-07 (HIGH, risk-increasing)** — `variance_ratio` (`quant.py:336`) and
+  `variance_ratio_test` (`quant.py:453-455`) measured the 1-bar variance denominator (and the test's `S`/mean)
+  over the FULL return array while the k-sum numerator was already restricted to within-session segments (see
+  S10). Cross-session gap returns therefore inflated `var1` and **DEFLATED VR on gapped instruments**
+  (SPX/EURUSD/BTC). Verified on the venv: VR4 = 1.165 vs the correct within-session 2.384 (~0.49×). Two
+  consequences via `decide.py:98,139` (raw returns WITH gaps + `times`): (1) Gate A momentum under-fires; (2)
+  `vr_h`→`scale_sigma` understates horizon σ ~30% → **stop too tight + position too large** — silently
+  reintroducing the #2 / S4 error, but only for gapped symbols (which is why gold slipped past two passes).
+  Fix: compute `var1`, the demeaning, and `S` over within-segment returns only
+  (`np.concatenate([r[s:e] for s,e in segs])`); the `times=None` path is byte-identical. Test
+  `test_variance_ratio_denominator_is_within_session` (zeroing the excluded gap return must not move VR; RED
+  showed 1.6e-05 vs 0.0044). **Directly extends S10** — S10 segmented the numerator but left the denominator
+  whole. **S / high**
+
+### P2 — consistency & decision logic
+- ~~**T2**~~ **[CERT] DONE 2026-08-07** — `analyze.py:140` computed the displayed VR without `times`, so the VR
+  the user READS differed from the VR `decide` ACTS on (and its filtered `ret` could stitch k-sums across a
+  removed gap). Now routed through the same raw-returns+`times` segmented path decide gates on
+  (`q.variance_ratio(q.log_returns(c), k, times=times)`), inheriting T1. **S / low**
+- ~~**T3**~~ **[CERT] DONE 2026-08-07** — `_edge_precondition` (`decide.py:200`) validated the edge for the
+  slope direction at bar `t`, but `decide` (`decide.py:99`) recomputes direction from `c[:t+1]`; on a slope flip
+  a long-validated edge could authorize a SHORT trade in the walk-forward feedback. `_edge_precondition` now
+  returns the validated direction (3-tuple); `decide` vetoes Gate B when it disagrees with the traded direction.
+  Backward-compatible with 2-tuple overrides. Test `test_edge_override_direction_must_match_trade`. **Extends
+  S1.** **S / low-med**
+
+### P3 — hygiene
+- ~~**T4**~~ **[CERT] DONE 2026-08-07** — `_confidence` (`decide.py:210`, introduced by S15) had a dead `'low'`
+  branch: it is only called after Gate C guarantees `ev>0`, so the `not (ev>0)` guard never fired and only
+  `high`/`medium` were ever emitted (the `Stance.confidence` "low | medium | high | none" contract was
+  unsatisfiable for a trade). Now `_confidence(p_target, ev, se_ev)` grades by `margin = ev/se_ev` (Gate C
+  already ensures `margin>1`): `margin<2 → low` (EV only marginally clears MC noise), else `high` if
+  `p_target>=0.55` else `medium`. All three tiers reachable; `se_ev` was already in scope at the call site.
+  Test `test_confidence_tiers_reflect_edge` updated (3-arg, asserts `low` reachable + zero-`se_ev` not-low).
+  **Evolves S15.** **S / low**
+
+### Live cross-asset validation (2026-08-07, 15m, 300 bars each, OANDA feed)
+Screened gold + SPX500USD + EURUSD + USDJPY + GBPUSD + AUDUSD live over CDP after the fixes. **All six →
+NO-TRADE**, every one vetoed at Gate A: all show **VR4 < 1 with negative z** (−0.5 to −2.0) — short-horizon
+forex/index microstructure is mean-reverting, not momentum, so Gate A (wants `VR>1`) correctly refuses. Gold's
+`analyze` reported "dropped 3 cross-gap returns" and its VR is now taken over the within-session denominator
+(T1 operating in production; the effect is small on gold as predicted, material on SPX/forex). Crypto (BINANCE
+feed) is not entitled on this account. Confirms the hardened engine's honest default across assets: flat is a
+position.
+
+### Still solid (do NOT touch)
+Everything on the first two passes' "do not touch" lists; the segmented numerator (S10) was correct — only its
+denominator counterpart was missing (T1).
+
 ## Suggested sequencing
 Quick wins first (all S-effort, each removes a real bias): **#6, #2, #4, #12, #15**. Then validity of the
 whole pipeline: **#1, #3, #5**. Then P2 method upgrades. Every fix lands with a test (strict TDD).
