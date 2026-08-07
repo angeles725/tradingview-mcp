@@ -61,6 +61,17 @@ def test_atomic_save_no_partial_on_reopen():
         _assert(not os.path.exists(path + ".tmp"), "no leftover temp file")
 
 
+def test_is_stale_detects_zero_range_and_volume():
+    ok = {"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100}
+    _assert(not co.is_stale(ok), "a normal bar is not stale")
+    _assert(co.is_stale({"open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 100}),
+            "zero-range (high==low) bar is stale")
+    _assert(co.is_stale({"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 0}),
+            "zero-volume bar is stale")
+    _assert(co.is_stale({"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5}),
+            "missing volume is stale")
+
+
 def test_valid_ohlc_predicate():
     _assert(co.valid_ohlc({"open": 4, "high": 6, "low": 3, "close": 5}),
             "a normal bar must be valid")

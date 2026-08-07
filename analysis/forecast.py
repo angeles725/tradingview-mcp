@@ -28,10 +28,35 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
 import sys
+
+try:
+    import fcntl
+    _HAS_FCNTL = True
+except ImportError:                     # non-Unix: degrade to no locking
+    _HAS_FCNTL = False
+
+
+@contextlib.contextmanager
+def _lock(path: str):
+    """Advisory exclusive file lock around the log's read-modify-write, so the
+    detached hook's `record` (append) and `score` (full rewrite) can't race and
+    drop forecasts. No-op where fcntl is unavailable."""
+    if not _HAS_FCNTL:
+        yield
+        return
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    lf = open(path + ".lock", "w")
+    try:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(lf, fcntl.LOCK_UN)
+        lf.close()
 
 MODELS = ("gaussian", "bootstrap", "student_t")
 DEFAULT_LOG = os.path.join(
@@ -241,24 +266,26 @@ def main():
     if args.cmd == "record":
         report = json.load(sys.stdin)
         rec = build_record(report)
-        append_log(args.log, rec)
+        with _lock(args.log):
+            append_log(args.log, rec)
         print(f"recorded {rec['symbol']} {rec['tf']}m h={rec['horizon_bars']} "
               f"S0={rec['S0']:.2f} target_unix={rec['target_unix']} -> {args.log}")
         return
 
     if args.cmd == "score":
         bars = _bars_from_stdin()
-        records = read_log(args.log)
-        n_scored = 0
-        for i, r in enumerate(records):
-            if r.get("realized"):
-                continue
-            tol = max(int(r.get("bar_step_sec") or 0) // 2, 1)
-            rc = nearest_close(bars, int(r["target_unix"]), tol)
-            if rc is not None:
-                records[i] = score_record(r, rc)
-                n_scored += 1
-        write_log(args.log, records)
+        with _lock(args.log):                 # read-modify-write must be atomic vs the hook
+            records = read_log(args.log)
+            n_scored = 0
+            for i, r in enumerate(records):
+                if r.get("realized"):
+                    continue
+                tol = max(int(r.get("bar_step_sec") or 0) // 2, 1)
+                rc = nearest_close(bars, int(r["target_unix"]), tol)
+                if rc is not None:
+                    records[i] = score_record(r, rc)
+                    n_scored += 1
+            write_log(args.log, records)
         print(f"scored {n_scored} newly-matured forecast(s) [{args.log}]")
         return
 

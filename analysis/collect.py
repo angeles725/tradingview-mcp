@@ -75,6 +75,23 @@ def valid_ohlc(b) -> bool:
     return h >= max(o, c, l) and l <= min(o, c, h)
 
 
+def is_stale(b) -> bool:
+    """Stale / illiquid bar: no traded range (high<=low) or no volume. A feed
+    stall produces such bars, whose ~zero return deflates sigma and drags VR
+    toward mean-reversion. Dropped at ingestion (the resulting time gap is handled
+    by the gap-aware returns)."""
+    try:
+        h = float(b["high"]); l = float(b["low"])
+    except (KeyError, TypeError, ValueError):
+        return True
+    if h <= l:
+        return True
+    try:
+        return float(b.get("volume", 0)) <= 0
+    except (TypeError, ValueError):
+        return True
+
+
 def merge(existing: dict, new_bars: list) -> tuple:
     """Merge new bars into the existing store (keyed by time). Returns
     (sorted_rows, n_new, n_updated). A repeated timestamp UPDATES the bar (the
@@ -171,14 +188,16 @@ def main():
     new_bars = read_bars_stdin()
     if not new_bars:
         raise SystemExit("no bars on stdin to collect")
-    clean = [b for b in new_bars if valid_ohlc(b)]
-    n_rej = len(new_bars) - len(clean)
+    n_rej = sum(1 for b in new_bars if not valid_ohlc(b))
+    n_stale = sum(1 for b in new_bars if valid_ohlc(b) and is_stale(b))
+    clean = [b for b in new_bars if valid_ohlc(b) and not is_stale(b)]
     existing = load_store(path)
     before = len(existing)
     ordered, n_new, n_upd = merge(existing, clean)
     save_store(path, ordered)
-    rej_note = f", {n_rej} rejected (bad OHLC)" if n_rej else ""
-    print(f"collected {args.symbol} {args.tf}m: +{n_new} new, {n_upd} updated{rej_note} "
+    notes = "".join([f", {n_rej} rejected (bad OHLC)" if n_rej else "",
+                     f", {n_stale} stale (no range/volume)" if n_stale else ""])
+    print(f"collected {args.symbol} {args.tf}m: +{n_new} new, {n_upd} updated{notes} "
           f"-> {len(ordered)} total (was {before})  [{path}]")
 
 

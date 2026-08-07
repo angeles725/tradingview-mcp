@@ -134,12 +134,12 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
 - ~~**S12**~~ **DONE 2026-08-07** — `_dir_hit` returns None unless `|p_up-0.5|>DIR_EPS(0.03)` and non-tie;
   `calibration` reports `dir_acc`/`dir_n` only over directional records (n/a otherwise); stats print updated.
   Test `test_dir_hit_only_scored_for_directional_cones`. **S / med**
-- **S13 stale-quote / zero-volume / forming-bar not detected** — `collect.valid_ohlc` checks structure only; a feed
-  stall (identical closes) deflates σ and drags VR<1. Fix: flag zero-volume/zero-range/identical runs; exclude the
-  forming last bar. **S-M / med**
-- **S14 [CERT] `forecasts.jsonl` full-rewrite + no lock → detached hook jobs can race and drop records** —
-  `forecast.py write_log` rebuilds from a pre-append snapshot. Fix: `fcntl.flock` around read-modify-write, or
-  append-only outcomes sidecar; dedupe by `made_at_unix`. **S / med**
+- ~~**S13**~~ **DONE 2026-08-07** — `collect.is_stale` flags zero-range (high<=low) or zero/missing-volume bars;
+  `collect.main` drops them at ingestion (becomes a gap, handled by gap-aware returns) and reports the count.
+  Test `test_is_stale_detects_zero_range_and_volume`. (forming-last-bar exclusion left optional) **S-M / med**
+- ~~**S14**~~ **[CERT] DONE 2026-08-07** — `forecast._lock` (fcntl.flock advisory, no-op off Unix) wraps `record`'s
+  append and `score`'s read-modify-write in `main`, so concurrent hook jobs can't race and drop records
+  (S7 dedupe also guards). Test `test_lock_context_manager_guards_ops`. **S / med**
 
 ### P3 — hygiene
 - **S15 `confidence` label ad-hoc** (`decide.py:162`) — tie it to block-CI margin / PSR / EV. **S / low-med**

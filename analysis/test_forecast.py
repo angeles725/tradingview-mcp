@@ -143,6 +143,19 @@ def test_nearest_close_within_tolerance():
     _assert(fc.nearest_close(bars, 9999, 450) is None, "no bar within tolerance")
 
 
+def test_lock_context_manager_guards_ops():
+    # score does a read-modify-write of the whole log; concurrent hook jobs must
+    # not clobber it. _lock must be a usable context manager and ops under it work.
+    path = os.path.join(tempfile.mkdtemp(), "forecasts.jsonl")
+    rec = fc.build_record(_report())
+    with fc._lock(path):
+        fc.append_log(path, rec)
+    _assert(len(fc.read_log(path)) == 1, "append under lock persisted")
+    with fc._lock(path):
+        fc.write_log(path, [])
+    _assert(fc.read_log(path) == [], "rewrite under lock works")
+
+
 def test_log_roundtrip(tmp=None):
     rec = fc.build_record(_report())
     path = os.path.join(tempfile.mkdtemp(), "forecasts.jsonl")
