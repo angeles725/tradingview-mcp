@@ -108,6 +108,38 @@ def test_stationary_bootstrap_preserves_contiguity():
             f"large blocks should be mostly contiguous, got {frac_contiguous:.2f}")
 
 
+def test_ohlc_vol_estimators_match_reference_formulas():
+    # Characterization/regression tests for the range vol estimators the audit
+    # flagged as untested. They pin each to its documented closed form.
+    h = np.array([101.0, 102.0]); l = np.array([100.0, 100.0])
+    exp_park = math.sqrt(np.mean(np.log(h / l) ** 2) / (4.0 * math.log(2.0)))
+    _assert(abs(q.parkinson_vol(h, l) - exp_park) < 1e-12,
+            f"parkinson must match its formula: {q.parkinson_vol(h, l)} vs {exp_park}")
+    o = np.array([100.5, 101.0]); c = np.array([100.8, 100.5])
+    hl = np.log(h / l); co = np.log(c / o)
+    exp_gk = math.sqrt(np.mean(0.5 * hl ** 2 - (2.0 * math.log(2.0) - 1.0) * co ** 2))
+    _assert(abs(q.garman_klass_vol(o, h, l, c) - exp_gk) < 1e-12,
+            f"garman-klass must match its formula: {q.garman_klass_vol(o, h, l, c)} vs {exp_gk}")
+    # close-to-close is the plain sample stdev of log returns
+    c2 = np.array([100.0, 101.0, 100.5, 102.0])
+    _assert(abs(q.close_to_close_vol(q.log_returns(c2)) -
+                np.std(np.diff(np.log(c2)), ddof=1)) < 1e-12, "c2c is sample stdev of log rets")
+
+
+def test_theilsen_exact_and_subsampled():
+    # a clean line has every pairwise slope == b, so both the exact and the
+    # subsampled path must recover it precisely
+    y_small = 3.0 + 2.0 * np.arange(50)
+    _assert(abs(q.theilsen_slope(y_small) - 2.0) < 1e-9, "exact path recovers the slope")
+    y_big = 5.0 + 2.0 * np.arange(3000)          # large enough to trigger subsampling
+    _assert(abs(q.theilsen_slope(y_big, max_pairs=50_000) - 2.0) < 1e-9,
+            "subsampled path still recovers a clean-line slope")
+    # robust to a single spike
+    y = np.arange(21, dtype=float)
+    y[10] += 100.0
+    _assert(abs(q.theilsen_slope(y) - 1.0) < 0.2, "median slope stays robust to one outlier")
+
+
 def test_bca_ci_symmetric_matches_percentile_and_shifts_on_bias():
     if not q._HAS_SCIPY:
         return

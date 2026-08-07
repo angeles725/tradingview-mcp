@@ -141,11 +141,25 @@ def ols_trend(closes: np.ndarray, r2_floor: float = 0.30) -> Trend:
     return Trend(slope, r2, t_stat, ci95, theil, significant, n)
 
 
-def theilsen_slope(y: np.ndarray) -> float:
-    """Median of pairwise slopes — robust to outliers/spikes. O(n^2) but n<=300."""
+def theilsen_slope(y: np.ndarray, max_pairs: int = 200_000, seed: int = 7) -> float:
+    """
+    Median of pairwise slopes — robust to outliers/spikes. Exact O(n^2) for a
+    small series; once the number of pairs would exceed `max_pairs` (the collector
+    grows history well past 300 bars) it SUBSAMPLES that many random index pairs,
+    an unbiased estimate of the same median at bounded O(max_pairs) cost/memory.
+    """
     y = np.asarray(y, dtype=float)
     n = y.size
-    i, j = np.triu_indices(n, k=1)
+    if n < 2:
+        return 0.0
+    if n * (n - 1) // 2 <= max_pairs:
+        i, j = np.triu_indices(n, k=1)
+    else:
+        rng = np.random.default_rng(seed)
+        i = rng.integers(0, n, size=max_pairs)
+        j = rng.integers(0, n, size=max_pairs)
+        keep = i != j
+        i, j = i[keep], j[keep]
     slopes = (y[j] - y[i]) / (j - i)
     return float(np.median(slopes))
 

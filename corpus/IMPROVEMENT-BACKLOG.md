@@ -50,9 +50,9 @@
 |---|---|---|---|---|---|
 | ~~15~~ | numerical-method | `quant.py:248` | EWMA seeded by single squared return, no de-mean [CERT] | **DONE 2026-08-07** — seed = mean(r²) over warm-up window (uncentered, matches the IGARCH recursion); test `test_ewma_seed_uses_warmup_window_not_single_return` | S / low-med |
 | ~~16~~ | forecast | `quant.py:364-372` | reported cone `mean` is Jensen-biased above median [CERT] | **DONE 2026-08-07** — key renamed `mean`→`mean_lognormal` with a comment that it is not an expected move; median/band remain the guidance (key was unused by display/forecast) | S / low |
-| 17 | tooling | `quant.py:90-96,241-323` | O(n²) Theil–Sen + pure-Python GARCH/EWMA don't scale with growing store | subsampled Theil–Sen, vectorize recursions, cap lookback | M / low-med |
+| ~~17~~ | tooling | `quant.py:90-96,241-323` | O(n²) Theil–Sen + pure-Python GARCH/EWMA don't scale with growing store [CERT] | **DONE 2026-08-07** — `theilsen_slope` subsamples up to `max_pairs` random pairs past the O(n²) budget (unbiased, bounded cost); test `test_theilsen_exact_and_subsampled`. GARCH/EWMA O(n) loops left as-is (fine to several thousand bars) | M / low-med |
 | ~~18~~ | data-capture | `collect.py:63-79` | no OHLC integrity check (`h>=max(o,c,l)`); poisons Parkinson/GK (`log(h/l)`) [CERT] | **DONE 2026-08-07** — `valid_ohlc(b)` (finite, positive, `h>=max(o,c,l)`, `l<=min(o,c,h)`); `main` filters invalid bars before merge and reports rejects; test `test_valid_ohlc_predicate` | S / low-med |
-| 19 | test-coverage | `test_quant/backtest/decide.py` | no tests for GARCH, OHLC vol vs reference, mc_student_t df guard, scale_sigma, walk_forward, #5 leak, VR significance, #4 CI wiring | add reference-value + regression tests | M / med |
+| ~~19~~ | test-coverage | `test_quant/backtest/decide.py` | gaps on the fragile numerics [CERT] | **DONE 2026-08-07** — suite grew 28→58; added tests for GARCH persistence, mc_student_t df guard, scale_sigma/VR, walk_forward purge, simulate_process lookahead, VR significance, block-CI verdict wiring, BCa, barrier probs, gap-aware returns, OHLC validity, and Parkinson/Garman-Klass/c2c reference formulas | M / med |
 
 ## Already correct — do NOT redo
 - No-lookahead fills in `backtest.simulate` (next-open entry, `exit_i>=n` drop), tested.
