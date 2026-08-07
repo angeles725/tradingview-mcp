@@ -130,6 +130,162 @@ def test_classify_regime_labels_trend_and_chop():
     _assert(np.mean(labels2 == "chop") > 0.7, "noise should be mostly chop")
 
 
+def test_newey_west_lrv_inflates_under_autocorrelation():
+    rng = np.random.default_rng(1)
+    u = rng.normal(0.0, 1.0, 500)
+    # lag 0 is exactly the sum of squares (the i.i.d. variance estimate)
+    _assert(abs(q.newey_west_lrv(u, 0) - float(np.sum(u * u))) < 1e-9,
+            "lag-0 LRV must equal the sum of squares")
+    # a positively autocorrelated series must inflate the long-run variance
+    a = np.zeros(500)
+    for i in range(1, 500):
+        a[i] = 0.9 * a[i - 1] + rng.normal(0.0, 1.0)
+    _assert(q.newey_west_lrv(a, 12) > float(np.sum(a * a)),
+            "positive autocorrelation must inflate LRV above the lag-0 term")
+
+
+def test_ols_trend_hac_widens_ci_on_autocorrelated_residuals():
+    # A random walk regressed on time has strongly autocorrelated residuals; the
+    # i.i.d. SE understates SE(slope) (spurious regression). HAC must widen the CI.
+    rng = np.random.default_rng(3)
+    c = 100.0 + np.cumsum(rng.normal(0.0, 1.0, 300))
+    tr = q.ols_trend(c)
+    n = c.size
+    x = np.arange(n, dtype=float); xm = x.mean()
+    sxx = float(np.sum((x - xm) ** 2))
+    ym = c.mean(); intercept = ym - tr.slope * xm
+    resid = c - (intercept + tr.slope * x)
+    sigma2 = float(np.sum(resid ** 2)) / (n - 2)
+    naive_se = math.sqrt(sigma2 / sxx)
+    tcrit = float(q.stats.t.ppf(0.975, n - 2)) if q._HAS_SCIPY else 1.96
+    naive_half = tcrit * naive_se
+    hac_half = (tr.ci95[1] - tr.ci95[0]) / 2.0
+    _assert(hac_half > naive_half * 1.2,
+            f"HAC CI must be materially wider than i.i.d. on autocorrelated "
+            f"residuals: hac_half={hac_half:.5f} vs naive_half={naive_half:.5f}")
+
+
+def test_ols_trend_rejects_spurious_random_walk_trend():
+    # A random walk has NO true trend, yet a level-on-time regression is
+    # spuriously significant far above nominal (Granger-Newbold). Gating trend
+    # significance on the stationary drift (log-returns) restores ~5% false
+    # positives. The old level-only test flagged ~60%+.
+    rng = np.random.default_rng(0)
+    N = 200
+    hits = sum(q.ols_trend(100.0 + np.cumsum(rng.normal(0.0, 1.0, 250))).significant
+               for _ in range(N))
+    _assert(hits < N * 0.15,
+            f"spurious random-walk trend rate too high: {hits}/{N} "
+            f"({100 * hits / N:.0f}%) — significance is not stationary")
+    # a genuine drift must still register as significant
+    rng2 = np.random.default_rng(7)
+    c = 100.0 * np.exp(np.cumsum(0.004 + 0.01 * rng2.normal(0.0, 1.0, 250)))
+    _assert(q.ols_trend(c).significant, "genuine drift must remain significant")
+
+
+def test_trend_significant_is_json_serializable_bool():
+    # np.bool_ is NOT a subclass of Python bool and breaks json.dumps, which
+    # silently broke analyze.py --json (the machine-readable report). significant
+    # must be a native bool and the trend dict must serialize.
+    import json
+    rng = np.random.default_rng(0)
+    c = np.cumsum(rng.normal(0.0, 1.0, 120)) + 100.0
+    tr = q.ols_trend(c)
+    _assert(type(tr.significant) is bool,
+            f"significant must be python bool, got {type(tr.significant).__name__}")
+    json.dumps(tr.as_dict())          # must not raise
+
+
+def test_benjamini_hochberg_matches_reference():
+    # Only the strong signal rejects when the rest are null.
+    p = np.array([0.001, 0.5, 0.6, 0.7, 0.8])
+    reject, padj = q.benjamini_hochberg(p, alpha=0.05)
+    _assert(reject[0] and not reject[1:].any(),
+            f"only the smallest p should reject, got {reject}")
+    _assert(np.all(padj >= p - 1e-12), "adjusted p must be >= raw p")
+    _assert(np.all(padj <= 1.0 + 1e-12), "adjusted p must stay <= 1")
+    # p-values exactly on the BH line should all reject.
+    p2 = np.array([0.01, 0.02, 0.03, 0.04, 0.05])
+    r2, _ = q.benjamini_hochberg(p2, alpha=0.05)
+    _assert(r2.all(), f"linear p-values at the BH threshold should all reject, got {r2}")
+
+
+def test_conditionals_multiple_testing_correction():
+    base = 0.5
+
+    def mk(name, p):
+        # n>=30 (not thin-sample); ci/edge are placeholders for the family test.
+        return q.Conditional(name, 50, 30, 0.6, (0.55, 0.65), base, 0.1, p, "edge")
+
+    # A borderline-significant condition among nulls must be DEMOTED once the
+    # number of simultaneous tests is accounted for.
+    fam = [mk("c0", 0.04), mk("c1", 0.9), mk("c2", 0.8), mk("c3", 0.85), mk("c4", 0.95)]
+    q.correct_conditionals(fam, alpha=0.05)
+    _assert(fam[0].verdict == "no-edge",
+            f"borderline edge must be demoted under correction, got {fam[0].verdict}")
+    # A genuinely strong signal survives the same correction.
+    fam2 = [mk("s0", 0.0005), mk("c1", 0.9), mk("c2", 0.8), mk("c3", 0.85), mk("c4", 0.95)]
+    q.correct_conditionals(fam2, alpha=0.05)
+    _assert(fam2[0].verdict == "edge",
+            f"strong signal should survive correction, got {fam2[0].verdict}")
+    _assert(fam2[0].p_adjusted >= fam2[0].p_value, "adjusted p must be >= raw p")
+
+
+def test_ewma_seed_uses_warmup_window_not_single_return():
+    # The RiskMetrics recursion is UNCENTERED (tracks E[r^2]); seeding it with a
+    # single r[0]^2 is an extremely noisy seed. Seeding with the mean squared
+    # return over a warm-up window is the same moment with far lower variance.
+    # For a series no longer than the warm-up window there is no recursion, so
+    # the estimate must equal sqrt(mean(r^2)) exactly — the old code returned a
+    # spike-dominated value instead.
+    r = np.array([0.20, 0.01, 0.01, 0.01, 0.01])   # lone first-bar spike, n<=warmup
+    expected = math.sqrt(float(np.mean(r ** 2)))
+    got = q.ewma_vol(r)
+    _assert(abs(got - expected) < 1e-12,
+            f"EWMA must seed with warm-up mean square: expected {expected}, got {got}")
+    # sanity: the spike must NOT dominate the way r[0]**2 seeding does
+    _assert(got < 0.12, f"first-bar spike still dominates EWMA: {got}")
+
+
+def test_mc_student_t_guards_degenerate_df():
+    # A Student-t with df<=2 has infinite variance; on a short noisy sample the
+    # MLE can land there and the simulated cone explodes. The guard must detect a
+    # degenerate df and fall back to the bounded bootstrap cone.
+    if not q._HAS_SCIPY:
+        return
+    rng = np.random.default_rng(9)
+    r = rng.normal(0.0, 0.01, 300)                 # well-behaved, bounded returns
+    orig_fit = q.stats.t.fit
+    try:
+        q.stats.t.fit = lambda *a, **k: (1.5, 0.0, 0.01)   # force df<=2
+        out = q.mc_student_t(100.0, r, horizon=5)
+    finally:
+        q.stats.t.fit = orig_fit
+    _assert("fallback" in out["model"] or "bootstrap" in out["model"],
+            f"degenerate df must fall back, got model={out['model']}")
+    _assert(out.get("df") == 1.5, f"degenerate df must be reported, got {out.get('df')}")
+    for key in ("P5", "P50", "P95", "mean"):
+        _assert(np.isfinite(out[key]), f"{key} must stay finite, got {out[key]}")
+
+
+def test_scale_sigma_uses_variance_ratio():
+    # sqrt(h) scaling assumes a random walk (VR=1). But the engine only trades
+    # when VR>1, where horizon variance is VR*h*sigma^2 — sqrt(h) understates it,
+    # making stops too tight and size too large. Scaling must honor VR.
+    s, h = 0.01, 9
+    _assert(abs(q.scale_sigma(s, h) - s * math.sqrt(h)) < 1e-12,
+            "default VR=1 must reproduce sqrt(h) scaling")
+    wide = q.scale_sigma(s, h, vr=2.0)
+    _assert(abs(wide - s * math.sqrt(h * 2.0)) < 1e-12,
+            "VR must scale variance: sigma*sqrt(h*vr)")
+    _assert(wide > q.scale_sigma(s, h), "VR>1 must widen horizon sigma vs random walk")
+    # degenerate VR (NaN / non-positive) must fall back to sqrt(h), never NaN
+    _assert(abs(q.scale_sigma(s, h, vr=float("nan")) - s * math.sqrt(h)) < 1e-12,
+            "NaN VR must fall back to sqrt(h)")
+    _assert(abs(q.scale_sigma(s, h, vr=0.0) - s * math.sqrt(h)) < 1e-12,
+            "non-positive VR must fall back to sqrt(h)")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

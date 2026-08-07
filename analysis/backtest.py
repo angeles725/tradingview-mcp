@@ -35,10 +35,15 @@ import quant as q
 # Rules — each returns a boolean signal array aligned to bars, using ONLY
 # information known at the close of bar t (no lookahead).
 # --------------------------------------------------------------------------- #
-def rule_ema_trend(o, h, l, c, period=20):
-    """Long when close is above its EMA — the canonical trend-following rule."""
+def rule_ema_trend(o, h, l, c, period=20, direction=1):
+    """Trend-following rule, mirrored to the trade direction.
+
+    Long (direction >= 0): close above its EMA. Short (direction < 0): close
+    BELOW its EMA. The condition must follow the direction — testing a long
+    signal for a short setup measures a counter-trend edge that does not exist.
+    """
     e = q.ema(c, period)
-    sig = c > e
+    sig = (c > e) if direction >= 0 else (c < e)
     sig[np.isnan(e)] = False
     return sig
 
@@ -134,7 +139,9 @@ def compute_stats(net, cost=0.0, min_n=30) -> BTStats:
     win_rate = wins.size / n
     mean = float(net.mean())
     gross = mean + cost
-    ci = q.bootstrap_mean_ci(net)
+    # Serial-dependence-honest CI: even non-overlapping trades cluster by regime,
+    # so the i.i.d. bootstrap under-covers. Judge the edge on the (wider) block CI.
+    ci = q.bootstrap_mean_ci_block(net)
     pf = float(wins.sum() / -losses.sum()) if losses.size and losses.sum() < 0 else float("inf")
     sd = net.std(ddof=1) if n > 1 else 0.0
     t_stat = mean / (sd / np.sqrt(n)) if sd > 0 else 0.0

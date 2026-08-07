@@ -104,7 +104,8 @@ def decide(o, h, l, c, cfg: Config, edge_override=None) -> Stance:
 
     # --- Gate B: cost-surviving net edge for this direction ------------------
     if edge_override is None:
-        rule_sig = bt.rule_ema_trend(o, h, l, c, period=cfg.ema_period)
+        rule_sig = bt.rule_ema_trend(o, h, l, c, period=cfg.ema_period,
+                                     direction=direction)
         net, cost = bt.simulate(rule_sig, o, c, cfg.horizon, 1.0, direction=direction)
         bstats = bt.compute_stats(net, cost)
         edge_ok = bstats.verdict == "edge"
@@ -120,7 +121,10 @@ def decide(o, h, l, c, cfg: Config, edge_override=None) -> Stance:
     # --- Gate C: risk/reward from the volatility cone ------------------------
     sigma_bar = q.garch11_vol(ret)
     sigma_bar = sigma_bar[0] if sigma_bar else q.ewma_vol(ret)
-    sigma_h = q.scale_sigma(sigma_bar, cfg.horizon)
+    # Scale to the horizon honoring serial correlation at that horizon; Gate A
+    # already established VR>1, so sqrt(h) alone would understate horizon vol.
+    vr_h = q.variance_ratio(ret, cfg.horizon)
+    sigma_h = q.scale_sigma(sigma_bar, cfg.horizon, vr=vr_h)
     entry = float(c[-1])
     cone = q.mc_bootstrap(entry, ret, cfg.horizon)
     if direction > 0:
@@ -155,23 +159,38 @@ def decide(o, h, l, c, cfg: Config, edge_override=None) -> Stance:
 # This is the "buena retroalimentación": how the WHOLE decision process behaves,
 # not any single indicator. Costs and next-open fills included; no lookahead.
 # --------------------------------------------------------------------------- #
-def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0):
+def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=1.0):
+    """Validate the rule's edge on history STRICTLY BEFORE bar t (expanding
+    window) — never on future bars. Returns (edge_ok, detail). Before there is
+    enough history to close a trade, no edge is claimed and the process stays
+    flat. This is the no-lookahead replacement for a single in-sample split.
+    """
+    rule_sig = bt.rule_ema_trend(o[:t], h[:t], l[:t], c[:t], period=cfg.ema_period)
+    net_is, cost = bt.simulate(rule_sig, o[:t], c[:t], cfg.horizon, cost_bps)
+    bs = bt.compute_stats(net_is, cost)
+    return (bs.verdict == "edge",
+            f"expanding edge@{t}={bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)")
+
+
+def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None):
     n = c.size
     warmup = max(cfg.ema_period, 30) + cfg.horizon
-    # Precompute a single edge precondition on the in-sample half, so Gate B is
-    # not re-bootstrapped every bar (O(n^2)); honest because a rule with no
-    # validated edge overall should keep the process flat throughout.
-    cut = int(n * 0.6)
-    rule_sig = bt.rule_ema_trend(o[:cut], h[:cut], l[:cut], c[:cut], period=cfg.ema_period)
-    net_is, cost = bt.simulate(rule_sig, o[:cut], c[:cut], cfg.horizon, cost_bps)
-    bstats_is = bt.compute_stats(net_is, cost)
-    edge_override = (bstats_is.verdict == "edge",
-                     f"in-sample edge={bstats_is.verdict} (exp {bstats_is.expectancy_bps:+.1f}bps)")
+    # Expanding-window edge precondition, recomputed only from bars[:t] (never the
+    # future). It is refreshed every `refit` bars rather than per-bar, bounding the
+    # walk to O(n^2 / refit) instead of leaking a single in-sample-half decision
+    # backwards onto earlier bars.
+    if refit is None:
+        refit = max(cfg.horizon, 10)
+    edge_override = (False, "insufficient history")
+    last_fit = -(10 ** 9)
 
     actions = {"BUY": 0, "SELL": 0, "NO-TRADE": 0}
     trades = []
     busy_until = -1
     for t in range(warmup, n - cfg.horizon):
+        if t - last_fit >= refit:
+            edge_override = _edge_precondition(o, h, l, c, t, cfg, cost_bps)
+            last_fit = t
         st = decide(o[:t + 1], h[:t + 1], l[:t + 1], c[:t + 1], cfg, edge_override)
         actions[st.action] += 1
         if st.action == "NO-TRADE" or t + 1 <= busy_until:

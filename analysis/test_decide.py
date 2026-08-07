@@ -87,6 +87,31 @@ def test_sizing_risks_fixed_fraction():
     _assert(abs(implied - st.risk_cash) < 1e-6, "size must risk exactly risk_cash")
 
 
+def test_edge_precondition_ignores_future_bars():
+    # The historical feedback must not leak the future: the edge precondition used
+    # to authorize a trade at bar t may only be validated on bars STRICTLY BEFORE
+    # t. Scrambling every bar at or after t must not change it.
+    o, h, l, c = _trending_series(200, seed=0)
+    cfg = Config()
+    t = 120
+    ref = d._edge_precondition(o, h, l, c, t, cfg)
+    o2, h2, l2, c2 = o.copy(), h.copy(), l.copy(), c.copy()
+    o2[t:] *= 2; h2[t:] *= 2; l2[t:] *= 2; c2[t:] *= 2      # corrupt the future
+    scr = d._edge_precondition(o2, h2, l2, c2, t, cfg)
+    _assert(ref == scr, f"edge precondition at t leaked bars >= t: {ref} != {scr}")
+
+
+def test_simulate_process_runs_without_lookahead():
+    # The whole feedback loop must run and report an honest verdict on a walk.
+    o, h, l, c = _trending_series(220, seed=2)
+    out = d.simulate_process(o, h, l, c, Config())
+    _assert(set(out["decisions"]) == {"BUY", "SELL", "NO-TRADE"}, "decisions tallied")
+    _assert("expanding edge@" in out["edge_precondition"],
+            f"expected expanding-window precondition, got {out['edge_precondition']}")
+    _assert(out["verdict"] in ("edge", "no-edge", "thin-sample", "no-trades"),
+            f"unexpected verdict {out['verdict']}")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

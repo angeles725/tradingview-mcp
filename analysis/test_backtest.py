@@ -89,6 +89,41 @@ def test_return_entries_align_with_trades():
     _assert(list(entries) == [4, 11, 21], f"entries misaligned: {list(entries)}")
 
 
+def test_verdict_uses_block_bootstrap_ci_not_iid():
+    # Non-overlapping trades still cluster by regime, so the i.i.d. CI under-covers.
+    # The honest serial-dependence-aware block CI must DRIVE the verdict and be the
+    # reported interval — not the narrower i.i.d. one the engine used to judge on.
+    rng = np.random.default_rng(5)
+    net = rng.normal(0.0008, 0.01, 80)          # n >= min_n, small positive mean
+    stats = bt.compute_stats(net)
+    block_ci = q.bootstrap_mean_ci_block(net)
+    _assert(stats.ci95_ret == block_ci,
+            f"reported CI must be the block CI {block_ci}, got {stats.ci95_ret}")
+    expected = "edge" if block_ci[0] > 0 else "no-edge"
+    _assert(stats.verdict == expected,
+            f"verdict must follow block CI: expected {expected}, got {stats.verdict}")
+
+
+def test_ema_rule_mirrors_condition_for_short():
+    # A short setup must test the DOWN condition (c < ema), not the long one.
+    # Otherwise Gate B measures "short whenever price is ABOVE its EMA" — a
+    # counter-trend signal that has nothing to do with a downtrend edge.
+    rng = np.random.default_rng(3)
+    c = 100 + np.cumsum(rng.normal(0, 1, 200))     # crosses its EMA both ways
+    o = c.copy(); h = c + 0.5; l = c - 0.5
+    e = q.ema(c, 20)
+    defined = ~np.isnan(e)
+    long_sig = bt.rule_ema_trend(o, h, l, c, period=20, direction=1)
+    short_sig = bt.rule_ema_trend(o, h, l, c, period=20, direction=-1)
+    _assert(np.array_equal(long_sig[defined], (c > e)[defined]),
+            "long signal must be c>ema")
+    _assert(np.array_equal(short_sig[defined], (c < e)[defined]),
+            "short signal must mirror to c<ema")
+    _assert(not np.any(long_sig & short_sig),
+            "long and short signals must be disjoint")
+    _assert(short_sig.sum() > 0, "short signal must fire somewhere on this series")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

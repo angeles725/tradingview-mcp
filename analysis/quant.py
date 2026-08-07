@@ -53,6 +53,23 @@ class Trend:
         return asdict(self)
 
 
+def newey_west_lrv(scores: np.ndarray, lag: int) -> float:
+    """
+    Newey-West HAC long-run variance of Sum(scores): gamma0 + 2*Sum Bartlett-
+    weighted autocovariances up to `lag`. Accounts for serial correlation the
+    i.i.d. sum-of-squares ignores. Clamped to gamma0 if the estimate goes
+    non-positive (possible at tiny samples).
+    """
+    u = np.asarray(scores, dtype=float)
+    n = u.size
+    g0 = float(np.sum(u * u))
+    s = g0
+    for l in range(1, min(lag, n - 1) + 1):
+        w = 1.0 - l / (lag + 1.0)
+        s += 2.0 * w * float(np.sum(u[l:] * u[:-l]))
+    return s if s > 0 else g0
+
+
 def ols_trend(closes: np.ndarray, r2_floor: float = 0.30) -> Trend:
     """
     Fit price ~ a + b*t by least squares and report the slope WITH its
@@ -73,17 +90,40 @@ def ols_trend(closes: np.ndarray, r2_floor: float = 0.30) -> Trend:
     ss_tot = np.sum((y - ym) ** 2)
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
-    # Standard error of the slope and its 95% CI (t approx by 1.96 for n>>1).
+    # Newey-West HAC standard error of the slope. Regressing a near-integrated
+    # PRICE LEVEL on time yields strongly autocorrelated residuals, so the i.i.d.
+    # SE = sqrt(sigma2/sxx) understates SE(slope) and inflates t (Granger-Newbold
+    # spurious regression). The HAC sandwich uses the scores u_t = (x_t-xbar)*e_t.
     dof = max(n - 2, 1)
-    sigma2 = ss_res / dof
-    se_slope = math.sqrt(sigma2 / sxx) if sxx > 0 else float("inf")
+    if sxx > 0 and n > 2:
+        lag = int(math.floor(4.0 * (n / 100.0) ** (2.0 / 9.0)))   # Newey-West plug-in
+        omega = newey_west_lrv((x - xm) * resid, lag)
+        se_slope = math.sqrt(omega) / sxx
+    else:
+        se_slope = float("inf")
     t_stat = slope / se_slope if se_slope > 0 else 0.0
     tcrit = stats.t.ppf(0.975, dof) if _HAS_SCIPY else 1.96
     half = tcrit * se_slope
     ci95 = (slope - half, slope + half)
 
     theil = theilsen_slope(y)
-    significant = (ci95[0] > 0 or ci95[1] < 0) and r2 >= r2_floor
+    # bool(...) coerces numpy's np.bool_ (not a subclass of Python bool) so the
+    # Trend serializes cleanly to JSON in analyze.py --json.
+    significant = bool((ci95[0] > 0 or ci95[1] < 0) and r2 >= r2_floor)
+    # HAC still can't rescue a level regression on an I(1) price: a random walk
+    # yields a high-R^2 sloped line with zero true drift. Require the STATIONARY
+    # drift (mean log-return) to be significant too — this restores the nominal
+    # false-positive rate that the level-on-time test inflates (~60% -> ~5%).
+    if significant and np.all(y > 0):
+        rr = np.diff(np.log(y))
+        m = rr.size
+        sd = rr.std(ddof=1) if m > 1 else 0.0
+        if m >= 3 and sd > 0:
+            t_drift = rr.mean() / (sd / math.sqrt(m))
+            tcrit_d = stats.t.ppf(0.975, m - 1) if _HAS_SCIPY else 1.96
+            significant = bool(abs(t_drift) > tcrit_d)
+        else:
+            significant = False
     return Trend(slope, r2, t_stat, ci95, theil, significant, n)
 
 
@@ -238,15 +278,24 @@ def close_to_close_vol(returns: np.ndarray) -> float:
     return float(np.std(r, ddof=1))
 
 
-def ewma_vol(returns: np.ndarray, lam: float = 0.94) -> float:
+def ewma_vol(returns: np.ndarray, lam: float = 0.94, warmup: int = 10) -> float:
     """
     RiskMetrics EWMA (an IGARCH). Weights recent bars more, so it tracks
     volatility CLUSTERING and returns the *current-conditional* sigma rather
     than a flat historical average. lam=0.94 is the RiskMetrics daily default.
+
+    Seeded with the mean squared return over a warm-up window. The recursion is
+    uncentered (it tracks E[r^2]), so the seed is the same uncentered moment,
+    NOT the centered sample variance — using a single r[0]^2 is a very noisy seed
+    whose error biases the early conditional sigma.
     """
     r = np.asarray(returns, dtype=float)
-    var = r[0] ** 2
-    for x in r[1:]:
+    n = r.size
+    if n == 0:
+        return 0.0
+    w = min(max(warmup, 1), n)
+    var = float(np.mean(r[:w] ** 2))
+    for x in r[w:]:
         var = lam * var + (1.0 - lam) * x * x
     return float(math.sqrt(var))
 
@@ -323,9 +372,18 @@ def garch11_vol(returns: np.ndarray):
     return math.sqrt(sigma_next), {"omega": omega, "alpha": alpha, "beta": beta}
 
 
-def scale_sigma(sigma_bar: float, horizon: int) -> float:
-    """Random-walk scaling of per-bar sigma to an N-bar horizon."""
-    return sigma_bar * math.sqrt(horizon)
+def scale_sigma(sigma_bar: float, horizon: int, vr: float = 1.0) -> float:
+    """Scale per-bar sigma to an N-bar horizon, honoring the variance ratio.
+
+    Under a random walk Var(h-bar) = h * sigma^2, i.e. sqrt(h). But with serial
+    correlation Var(h-bar) ~ VR(h) * h * sigma^2, so sigma_h = sigma * sqrt(h*VR).
+    Since the engine only trades when VR>1, plain sqrt(h) understates horizon
+    volatility exactly in the trading regime. A degenerate VR (NaN or <=0) falls
+    back to random-walk scaling rather than propagating NaN.
+    """
+    if vr is None or not math.isfinite(vr) or vr <= 0:
+        vr = 1.0
+    return sigma_bar * math.sqrt(horizon * vr)
 
 
 # --------------------------------------------------------------------------- #
@@ -414,6 +472,15 @@ def mc_student_t(S0: float, returns: np.ndarray, horizon: int,
         out["model"] = "student_t(fallback=gaussian)"
         return out
     df, loc, scale = stats.t.fit(r)
+    # A Student-t with df<=2 has infinite variance (df<=1 infinite mean); on a
+    # short noisy sample the MLE can land there, making the simulated cone blow
+    # up. Fall back to the assumption-free bootstrap cone, whose draws are actual
+    # observed returns and therefore bounded, and flag the degenerate fit.
+    if not math.isfinite(df) or df <= 2.0 or not math.isfinite(scale) or scale <= 0:
+        out = mc_bootstrap(S0, r, horizon, drift_zero, n, seed)
+        out["model"] = f"bootstrap(fallback: student_t df={df:.2f} degenerate)"
+        out["df"] = float(df)
+        return out
     rng = np.random.default_rng(seed)
     draws = stats.t.rvs(df, loc=loc, scale=scale, size=(n, horizon),
                         random_state=rng)
@@ -454,6 +521,7 @@ class Conditional:
     edge: float          # rate - baseline
     p_value: float       # two-sided binomial test vs baseline
     verdict: str         # "edge" | "no-edge" | "thin-sample"
+    p_adjusted: float = float("nan")   # family-corrected p (Benjamini-Hochberg)
 
     def as_dict(self):
         return asdict(self)
@@ -487,3 +555,51 @@ def conditional_next_up(name: str, mask: np.ndarray, next_up: np.ndarray,
         verdict = "no-edge"
     return Conditional(name, n, up, rate, ci, baseline, rate - baseline,
                        p_value, verdict)
+
+
+def benjamini_hochberg(pvalues, alpha: float = 0.05):
+    """
+    Benjamini-Hochberg FDR procedure. Returns (reject, p_adjusted) as arrays
+    aligned to the input. Controls the false-discovery rate across a family of
+    simultaneous tests, which is exactly what a menu of conditional signals or a
+    parameter sweep needs: testing k conditions each at alpha inflates the
+    family-wise false-positive rate to ~1-(1-alpha)^k.
+    """
+    p = np.asarray(pvalues, dtype=float)
+    m = p.size
+    reject = np.zeros(m, dtype=bool)
+    padj = np.ones(m)
+    if m == 0:
+        return reject, padj
+    order = np.argsort(p)
+    ps = p[order]
+    ranks = np.arange(1, m + 1)
+    # step-up rejection: largest k with p_(k) <= (k/m)*alpha rejects ranks 1..k
+    below = np.nonzero(ps <= ranks / m * alpha)[0]
+    rej_sorted = np.zeros(m, dtype=bool)
+    if below.size:
+        rej_sorted[: below.max() + 1] = True
+    # monotone adjusted p-values, enforced from the largest rank down
+    adj_sorted = np.clip(np.minimum.accumulate((ps * m / ranks)[::-1])[::-1], 0.0, 1.0)
+    reject[order] = rej_sorted
+    padj[order] = adj_sorted
+    return reject, padj
+
+
+def correct_conditionals(conditionals, alpha: float = 0.05):
+    """
+    Apply Benjamini-Hochberg across the FAMILY of conditional tests, in place.
+    An individual Wilson CI clearing the baseline is not an edge once you count
+    how many conditions were tried; this re-labels each verdict by FDR-controlled
+    significance and records `p_adjusted`. Thin-sample / NaN-p conditions are
+    excluded from the family and left untouched.
+    """
+    testable = [c for c in conditionals
+                if c.verdict != "thin-sample" and c.p_value == c.p_value]
+    if not testable:
+        return conditionals
+    reject, padj = benjamini_hochberg([c.p_value for c in testable], alpha)
+    for c, rej, pa in zip(testable, reject, padj):
+        c.p_adjusted = float(pa)
+        c.verdict = "edge" if rej else "no-edge"
+    return conditionals

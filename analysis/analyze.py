@@ -130,10 +130,14 @@ def main():
     # --- Conditional probabilities ---------------------------------------
     baseline = float(np.mean(np.diff(c) > 0))
     conds, next_up = build_conditions(c, o, rsi, ret)
-    conditionals = [
-        q.conditional_next_up(name, mask, next_up, baseline).as_dict()
-        for name, mask in conds.items()
-    ]
+    cond_objs = [q.conditional_next_up(name, mask, next_up, baseline)
+                 for name, mask in conds.items()]
+    # Correct for multiple testing: with several conditions each judged at 0.05,
+    # the family-wise false-positive rate balloons. BH-FDR re-labels the verdicts.
+    q.correct_conditionals(cond_objs, alpha=0.05)
+    n_tested = sum(1 for cnd in cond_objs
+                   if cnd.verdict != "thin-sample" and cnd.p_value == cnd.p_value)
+    conditionals = [cnd.as_dict() for cnd in cond_objs]
 
     report = {
         "symbol": args.symbol,
@@ -155,6 +159,9 @@ def main():
         "monte_carlo": {"gaussian": cone_g, "bootstrap": cone_b, "student_t": cone_t},
         "baseline_next_up": baseline,
         "conditionals": conditionals,
+        "conditionals_correction": {
+            "method": "benjamini_hochberg", "alpha": 0.05, "n_tested": n_tested,
+        },
     }
 
     if args.json:
@@ -218,14 +225,19 @@ def _print_human(r):
     print("  -> deliver the BAND (e.g. 90% inside P5..P95), never the median.")
     print("  -> if bootstrap/t P5..P95 is WIDER than gaussian, tails are fat: size down.")
 
+    corr = r.get("conditionals_correction", {})
     print(f"\nCONDITIONAL P(next bar up)   baseline = {r['baseline_next_up']:.3f}")
-    print(f"  {'condition':<24}{'n':>5}{'rate':>8}{'95% CI':>16}{'edge':>8}{'p':>8}  verdict")
+    print(f"  {'condition':<24}{'n':>5}{'rate':>8}{'95% CI':>16}{'edge':>8}{'p':>8}{'p_adj':>8}  verdict")
     for cnd in r["conditionals"]:
         ci = f"[{cnd['ci95'][0]:.2f},{cnd['ci95'][1]:.2f}]"
         pv = _fmt(cnd["p_value"], 3)
+        padj = _fmt(cnd.get("p_adjusted"), 3)
         print(f"  {cnd['name']:<24}{cnd['n']:>5}{cnd['rate']:>8.2f}{ci:>16}"
-              f"{cnd['edge']:>+8.2f}{pv:>8}  {cnd['verdict']}")
+              f"{cnd['edge']:>+8.2f}{pv:>8}{padj:>8}  {cnd['verdict']}")
     print("  -> 'thin-sample' (n<30) or a CI straddling baseline = NO edge.")
+    if corr:
+        print(f"  -> verdict is FDR-corrected ({corr.get('method')}, "
+              f"{corr.get('n_tested')} tests): a lone p<0.05 is NOT an edge.")
     print("=" * W)
     print("Guardrail: no line above predicts DIRECTION. This sizes the move and")
     print("attaches a probability. Risk management and an honest backtest decide P&L.")
