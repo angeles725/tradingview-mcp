@@ -47,6 +47,8 @@ def log_returns(closes: np.ndarray, times=None, gap_tol: float = 2.0) -> np.ndar
     if pos.size == 0:
         return r
     step = float(np.median(pos))
+    if step >= _INTRADAY_STEP_MAX:      # daily+ cadence: weekends/holidays are
+        return r                         # normal bar boundaries, not session gaps
     return r[dt <= gap_tol * step]
 
 
@@ -285,16 +287,26 @@ def bootstrap_mean_ci_block(x: np.ndarray, expected_block: float = 10.0,
 # Regime — is the series trending or mean-reverting? A trend rule that looks
 # good only inside a trend is not an edge; regime tells you when to trust it.
 # --------------------------------------------------------------------------- #
+# A bar cadence at or above one day is daily+/weekly: weekend and holiday
+# "gaps" are the normal spacing between bars, not intraday session gaps to
+# exclude. The gap-awareness (built for intraday) is disabled at/above this.
+_INTRADAY_STEP_MAX = 86400.0            # seconds (1 day)
+
+
 def _return_segments(times, gap_tol: float = 2.0):
     """Index ranges (s,e) into the RETURNS array (len = len(times)-1) of consecutive
     WITHIN-SESSION returns. A return spanning a time gap (dt > gap_tol*median step)
-    is a boundary, so overlapping k-sums never stitch across a session gap."""
+    is a boundary, so overlapping k-sums never stitch across a session gap. On a
+    daily+ cadence there are no intraday gaps to split, so the whole series is one
+    segment."""
     t = np.asarray(times, dtype=float)
     dt = np.diff(t)
     pos = dt[dt > 0]
     if pos.size == 0:
         return [(0, dt.size)]
     step = float(np.median(pos))
+    if step >= _INTRADAY_STEP_MAX:      # daily+ cadence: no session-gap fragmentation
+        return [(0, dt.size)]
     valid = dt <= gap_tol * step
     segs, s = [], None
     for i, v in enumerate(valid):

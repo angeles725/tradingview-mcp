@@ -353,6 +353,45 @@ def test_variance_ratio_test_calibrated_and_detects_momentum():
             f"genuine momentum must be VR>1 and significant, got vr={vr:.2f} z={z:.2f}")
 
 
+def _daily_times(steps_days):
+    # Build unix-second daily timestamps from a list of day-steps (weekends = 3).
+    day = 86400.0
+    return np.concatenate([[0.0], np.cumsum(np.asarray(steps_days, float) * day)])
+
+
+def test_log_returns_keeps_weekend_returns_on_daily():
+    # On a DAILY cadence a weekend (Fri->Mon) is a normal bar boundary, not an
+    # intraday session gap; the intraday gap-exclusion must NOT drop it, or ~20%
+    # of legitimate daily returns vanish and drift/vol lose power.
+    times = _daily_times([1, 1, 1, 1, 3] * 3)          # 3 weekends among weekdays
+    c = 100.0 * np.exp(np.cumsum(np.full(times.size, 0.001)))
+    r = q.log_returns(c, times=times)
+    _assert(r.size == times.size - 1,
+            f"daily weekend returns must be kept: got {r.size}, want {times.size - 1}")
+    # intraday still drops its session gaps (unchanged behaviour)
+    it = np.array([0, 60, 120, 100000, 100060], dtype=float)
+    ci = np.array([100.0, 101.0, 102.0, 200.0, 202.0])
+    _assert(q.log_returns(ci, times=it).size == 3, "intraday gap must still be dropped")
+
+
+def test_return_segments_not_fragmented_on_daily():
+    # Daily cadence must stay ONE segment — fragmenting per-week nans out VR at
+    # higher k. Only intraday session gaps fragment.
+    times = _daily_times([1, 1, 1, 1, 3, 1, 1, 1, 1, 3, 1])
+    segs = q._return_segments(times)
+    _assert(segs == [(0, times.size - 1)], f"daily must be one segment, got {segs}")
+
+
+def test_variance_ratio_computable_on_daily_with_weekends():
+    # The payoff: VR(8) must be COMPUTABLE on daily data with weekend gaps (was
+    # nan because weekly ~4-5 bar segments never reached k=8).
+    times = _daily_times(([1, 1, 1, 1, 3] * 9)[:-1])   # ~44 daily bars
+    rng = np.random.default_rng(0)
+    c = 100.0 * np.exp(np.cumsum(rng.normal(0.0005, 0.01, times.size)))
+    vr8 = q.variance_ratio(q.log_returns(c), 8, times=times)
+    _assert(not math.isnan(vr8), "VR(8) must be computable on daily data with weekend gaps")
+
+
 def test_log_returns_excludes_cross_gap():
     # A session/overnight gap makes one "bar return" a multi-period jump — a fat
     # outlier that inflates sigma and corrupts GARCH/VR. With timestamps, the
