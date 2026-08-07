@@ -255,6 +255,43 @@ def variance_ratio(returns: np.ndarray, k: int) -> float:
     return float(vark / (k * var1))
 
 
+def barrier_hit_probabilities(entry: float, returns: np.ndarray, horizon: int,
+                              stop: float, target: float, direction: int = 1,
+                              drift_zero: bool = True, n: int = 20000,
+                              seed: int = 7) -> dict:
+    """
+    Monte-Carlo FIRST-PASSAGE probabilities: over `horizon` bars, which barrier
+    (target or stop) is touched FIRST. Resamples historical log-returns (zero
+    drift by default) into price paths and checks the barriers bar by bar. A raw
+    reward:risk ratio ignores this: a 1.5:1 setup whose stop is far likelier to
+    trigger first is not favourable. Uses close-path prices (no intrabar extremes),
+    so hit probabilities are mild UNDER-estimates. Returns p_target/p_stop/p_neither.
+    """
+    r = np.asarray(returns, dtype=float)
+    if r.size == 0 or horizon < 1:
+        return {"p_target": float("nan"), "p_stop": float("nan"), "p_neither": float("nan")}
+    if drift_zero:
+        r = r - r.mean()
+    rng = np.random.default_rng(seed)
+    draws = rng.choice(r, size=(n, horizon), replace=True)
+    price = entry * np.exp(np.cumsum(draws, axis=1))
+    if direction > 0:
+        hit_t, hit_s = price >= target, price <= stop
+    else:
+        hit_t, hit_s = price <= target, price >= stop
+
+    def _first(mask):
+        idx = np.argmax(mask, axis=1)
+        idx[~mask.any(axis=1)] = horizon          # no hit -> sentinel past the end
+        return idx
+
+    it, istop = _first(hit_t), _first(hit_s)
+    p_target = float(np.mean(it < istop))
+    p_stop = float(np.mean(istop < it))
+    return {"p_target": p_target, "p_stop": p_stop,
+            "p_neither": float(1.0 - p_target - p_stop)}
+
+
 def max_drawdown(returns: np.ndarray) -> float:
     """Maximum peak-to-trough drawdown as a FRACTION, from per-trade log returns.
     Expectancy hides path risk: two rules with equal mean can have wildly
@@ -414,47 +451,64 @@ def garman_klass_vol(o, h, l, c) -> float:
 
 def garch11_vol(returns: np.ndarray):
     """
-    Fit a GARCH(1,1) by Gaussian MLE and return the one-step-ahead conditional
-    sigma. Captures volatility clustering with mean reversion (unlike EWMA,
-    which never reverts). Returns (sigma, params) or None if scipy is absent or
-    the optimiser fails; callers fall back to EWMA.
+    Fit a GARCH(1,1) with STUDENT-t innovations and return the one-step-ahead
+    conditional sigma. Real returns are fat-tailed, so Gaussian MLE biases the
+    alpha/beta estimates; a t likelihood (df estimated) is the honest choice.
+    Uses VARIANCE TARGETING (omega = var*(1-alpha-beta)) to drop a parameter and
+    MULTIPLE STARTS for optimiser robustness. Returns (sigma, params) — params
+    includes nu — or None if scipy is absent / the fit fails; callers fall to EWMA.
     """
     if not _HAS_SCIPY:
         return None
     r = np.asarray(returns, dtype=float)
     r = r - r.mean()
-    var0 = np.var(r)
-    if var0 <= 0:
+    var0 = float(np.var(r))
+    if var0 <= 0 or r.size < 10:
         return None
 
-    def nll(theta):
-        omega, alpha, beta = theta
-        if omega <= 0 or alpha < 0 or beta < 0 or alpha + beta >= 0.999:
-            return 1e12
-        sigma2 = np.empty_like(r)
-        sigma2[0] = var0
+    def sigma2_path(alpha, beta):
+        omega = var0 * (1.0 - alpha - beta)          # variance targeting
+        s2 = np.empty_like(r)
+        s2[0] = var0
         for t in range(1, r.size):
-            sigma2[t] = omega + alpha * r[t - 1] ** 2 + beta * sigma2[t - 1]
-        return 0.5 * np.sum(np.log(2 * np.pi * sigma2) + r ** 2 / sigma2)
+            s2[t] = omega + alpha * r[t - 1] ** 2 + beta * s2[t - 1]
+        return s2, omega
 
-    x0 = np.array([var0 * 0.05, 0.05, 0.90])
-    try:
-        res = optimize.minimize(
-            nll, x0, method="Nelder-Mead",
-            options={"maxiter": 4000, "xatol": 1e-10, "fatol": 1e-10},
-        )
-    except Exception:
+    def nll_t(theta):
+        alpha, beta, nu = theta
+        if alpha < 0 or beta < 0 or alpha + beta >= 0.999 or nu <= 2.05 or nu > 200:
+            return 1e12
+        s2, _ = sigma2_path(alpha, beta)
+        if np.any(s2 <= 0) or not np.all(np.isfinite(s2)):
+            return 1e12
+        # variance-standardized Student-t (Var=sigma^2 via the (nu-2) scaling)
+        c = math.lgamma((nu + 1) / 2) - math.lgamma(nu / 2) - 0.5 * math.log(math.pi * (nu - 2))
+        ll = c - 0.5 * np.log(s2) - ((nu + 1) / 2) * np.log(1.0 + r ** 2 / ((nu - 2) * s2))
+        return -float(np.sum(ll))
+
+    best = None
+    for x0 in ((0.05, 0.90, 8.0), (0.10, 0.85, 5.0), (0.03, 0.95, 12.0)):
+        try:
+            res = optimize.minimize(nll_t, np.array(x0), method="Nelder-Mead",
+                                    options={"maxiter": 4000, "xatol": 1e-8, "fatol": 1e-8})
+        except Exception:
+            continue
+        if np.isfinite(res.fun) and (best is None or res.fun < best.fun):
+            best = res
+    if best is None:
         return None
-    if not res.success and res.fun >= 1e11:
+    alpha, beta, nu = best.x
+    if alpha < 0 or beta < 0 or alpha + beta >= 1 or nu <= 2:
         return None
-    omega, alpha, beta = res.x
-    if omega <= 0 or alpha < 0 or beta < 0 or alpha + beta >= 1:
-        return None
+    omega = var0 * (1.0 - alpha - beta)
     sigma2 = var0
     for t in range(1, r.size):
         sigma2 = omega + alpha * r[t - 1] ** 2 + beta * sigma2
     sigma_next = omega + alpha * r[-1] ** 2 + beta * sigma2
-    return math.sqrt(sigma_next), {"omega": omega, "alpha": alpha, "beta": beta}
+    if sigma_next <= 0 or not np.isfinite(sigma_next):
+        return None
+    return math.sqrt(sigma_next), {"omega": float(omega), "alpha": float(alpha),
+                                   "beta": float(beta), "nu": float(nu)}
 
 
 def scale_sigma(sigma_bar: float, horizon: int, vr: float = 1.0) -> float:

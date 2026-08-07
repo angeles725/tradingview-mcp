@@ -140,12 +140,21 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None) -> Stance:
     risk = abs(entry - stop)
     reward = abs(target - entry)
     rr = reward / risk if risk > 0 else 0.0
-    c_ok = rr >= cfg.min_rr
+    # First-passage EV: RR alone ignores that the stop may be touched FIRST far
+    # more often than the target. Require a favourable RR AND positive expected
+    # value from the barrier-hit probabilities.
+    bp = q.barrier_hit_probabilities(entry, ret, cfg.horizon, stop, target, direction)
+    ev = bp["p_target"] * reward - bp["p_stop"] * risk
+    c_ok = rr >= cfg.min_rr and np.isfinite(ev) and ev > 0
     gates.append(asdict(Gate("C_risk_reward", c_ok,
                       f"entry={entry:.2f} stop={stop:.2f} target={target:.2f} "
-                      f"R:R={rr:.2f} (min {cfg.min_rr})")))
+                      f"R:R={rr:.2f} (min {cfg.min_rr})  "
+                      f"P(tgt)={bp['p_target']:.2f} P(stop)={bp['p_stop']:.2f} "
+                      f"EV={ev:+.2f}")))
     if not c_ok:
-        return _no_trade(f"reward:risk {rr:.2f} below {cfg.min_rr} (Gate C)", gates)
+        why = (f"reward:risk {rr:.2f} below {cfg.min_rr}" if rr < cfg.min_rr
+               else f"negative expected value (EV={ev:+.2f})")
+        return _no_trade(f"{why} (Gate C)", gates)
 
     # --- All gates passed: size by fixed risk, never by conviction -----------
     risk_cash = cfg.risk_frac * cfg.equity

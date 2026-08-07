@@ -130,6 +130,42 @@ def test_classify_regime_labels_trend_and_chop():
     _assert(np.mean(labels2 == "chop") > 0.7, "noise should be mostly chop")
 
 
+def test_garch_recovers_persistence_with_student_t():
+    if not q._HAS_SCIPY:
+        return
+    rng = np.random.default_rng(0)
+    n, omega, alpha, beta = 1500, 1e-6, 0.08, 0.90    # persistence 0.98
+    r = np.zeros(n)
+    s2 = omega / (1 - alpha - beta)
+    for t in range(1, n):
+        s2 = omega + alpha * r[t - 1] ** 2 + beta * s2
+        r[t] = math.sqrt(s2) * rng.normal()
+    out = q.garch11_vol(r)
+    _assert(out is not None, "GARCH must fit a clustered series")
+    sig, p = out
+    _assert(sig > 0, f"one-step sigma must be positive, got {sig}")
+    _assert(0.7 < p["alpha"] + p["beta"] < 1.0,
+            f"should recover high persistence, got {p['alpha'] + p['beta']:.2f}")
+    _assert(p["nu"] > 2.0, f"Student-t df must be > 2 (finite variance), got {p['nu']}")
+
+
+def test_barrier_hit_probabilities():
+    # First-passage MC: which barrier is touched FIRST, not just the terminal side.
+    rng = np.random.default_rng(0)
+    r = rng.normal(0.0, 0.01, 500)
+    entry = 100.0
+    bp = q.barrier_hit_probabilities(entry, r, 20, stop=98.0, target=102.0, direction=1)
+    _assert(0 <= bp["p_target"] <= 1 and 0 <= bp["p_stop"] <= 1, "probs in range")
+    _assert(abs(bp["p_target"] + bp["p_stop"] + bp["p_neither"] - 1.0) < 1e-9, "sum to 1")
+    # symmetric barriers under zero drift -> roughly equal hit probabilities
+    _assert(abs(bp["p_target"] - bp["p_stop"]) < 0.08,
+            f"symmetric barriers should be ~equal, got {bp}")
+    # a NEARER target must be hit first more often than a far one
+    near = q.barrier_hit_probabilities(entry, r, 20, 98.0, 101.0, 1)
+    far = q.barrier_hit_probabilities(entry, r, 20, 98.0, 104.0, 1)
+    _assert(near["p_target"] > far["p_target"], "nearer target should hit more often")
+
+
 def test_max_drawdown_and_probabilistic_sharpe():
     # equity rises to +0.2 then a -0.3 return -> peak-to-trough dd = 1-exp(-0.3)
     r = np.array([0.1, 0.1, -0.3, 0.05])
