@@ -213,6 +213,25 @@ def test_barrier_hit_probabilities():
     _assert(near["p_target"] > far["p_target"], "nearer target should hit more often")
 
 
+def test_barrier_uses_block_bootstrap():
+    # The trade only exists because Gate A asserts VR>1 (momentum); barrier paths
+    # must inherit that serial structure via the stationary block bootstrap, not
+    # i.i.d. resampling (which erases the very dependence the strategy requires).
+    orig = q.stationary_bootstrap_indices
+    called = {"n": 0}
+    try:
+        def counting(*a, **k):
+            called["n"] += 1
+            return orig(*a, **k)
+        q.stationary_bootstrap_indices = counting
+        c = 100.0 * np.exp(np.cumsum(np.random.default_rng(0).normal(0.0, 0.005, 300)))
+        q.barrier_hit_probabilities(float(c[-1]), c.copy(), c * 1.001, c * 0.999, c, 10,
+                                    float(c[-1]) * 0.99, float(c[-1]) * 1.02, 1)
+    finally:
+        q.stationary_bootstrap_indices = orig
+    _assert(called["n"] >= 1, "barrier MC must use the stationary block bootstrap")
+
+
 def test_barrier_intrabar_raises_stop_probability():
     # Wider intrabar ranges must touch the stop MORE often than a close-only path;
     # zero-range bars must reduce to the close path.
@@ -242,6 +261,22 @@ def test_max_drawdown_and_probabilistic_sharpe():
     flat = np.array([0.01, -0.01] * 100)
     psr_flat = q.probabilistic_sharpe(flat)
     _assert(abs(psr_flat - 0.5) < 1e-9, f"zero-mean sample must give PSR 0.5, got {psr_flat:.3f}")
+
+
+def test_variance_ratio_segments_across_gaps():
+    # Gap-filtered returns become array-adjacent; VR's overlapping k-sums must NOT
+    # stitch a pre-gap and a post-gap return together.
+    r = np.array([0.01, -0.01, 0.01, -0.01, 0.02, -0.02, 0.02, -0.02])
+    times = np.array([0, 60, 120, 180, 240, 100000, 100060, 100120, 100180])
+    segs = q._return_segments(times, gap_tol=2.0)
+    _assert(segs == [(0, 4), (5, 8)], f"segments must split at the gap, got {segs}")
+    vr_seg = q.variance_ratio(r, 2, times=times)
+    vr_all = q.variance_ratio(r, 2)
+    _assert(not math.isnan(vr_seg), "segmented VR must be computable")
+    _assert(vr_seg != vr_all, "segmentation must change VR vs the stitched version")
+    # variance_ratio_test accepts times too (segmented) and returns finite z
+    vr, z, p = q.variance_ratio_test(r, 2, times=times)
+    _assert(not math.isnan(vr), "segmented VR test must be computable")
 
 
 def test_variance_ratio_test_calibrated_and_detects_momentum():

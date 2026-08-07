@@ -49,6 +49,7 @@ class Config:
     stop_k: float = 1.0        # stop distance in cone-sigma (horizon-scaled) units
     risk_frac: float = 0.01    # fraction of equity risked per trade
     equity: float = 10_000.0
+    max_leverage: float = 10.0 # notional cap = max_leverage * equity (sizing guard)
     ema_period: int = 20
 
 
@@ -90,10 +91,11 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
     if n < max(cfg.ema_period, 30) + cfg.horizon:
         return _no_trade("insufficient bars for a decision", gates)
 
-    ret = q.log_returns(c, times=times)   # gap-aware when timestamps are supplied
+    ret = q.log_returns(c, times=times)   # gap-aware (drops cross-gap returns) for vol/cones
+    ret_raw = q.log_returns(c)            # raw, aligned to `times`, for segmented VR
     trend = q.ols_trend(c, cfg.r2_floor)
     regime = str(q.classify_regime(c, window=20)[-1])
-    vr, vr_z, _ = q.variance_ratio_test(ret, cfg.vr_k)
+    vr, vr_z, _ = q.variance_ratio_test(ret_raw, cfg.vr_k, times=times)
     direction = 1 if trend.slope > 0 else -1
     want_regime = "trend-up" if direction > 0 else "trend-down"
 
@@ -134,7 +136,7 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
         sigma_bar = sigma_bar[0] if sigma_bar else q.ewma_vol(ret)
     # Scale to the horizon honoring serial correlation at that horizon; Gate A
     # already established VR>1, so sqrt(h) alone would understate horizon vol.
-    vr_h = q.variance_ratio(ret, cfg.horizon)
+    vr_h = q.variance_ratio(ret_raw, cfg.horizon, times=times)
     sigma_h = q.scale_sigma(sigma_bar, cfg.horizon, vr=vr_h)
     entry = float(c[-1])
     cone = q.mc_bootstrap(entry, ret, cfg.horizon)
@@ -163,9 +165,9 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
                else f"negative expected value (EV={ev:+.2f})")
         return _no_trade(f"{why} (Gate C)", gates)
 
-    # --- All gates passed: size by fixed risk, never by conviction -----------
+    # --- All gates passed: size by fixed risk, capped by leverage ------------
     risk_cash = cfg.risk_frac * cfg.equity
-    size = risk_cash / risk if risk > 0 else 0.0
+    size, risk_cash = _position_size(risk_cash, risk, entry, cfg.equity, cfg.max_leverage)
     confidence = "high" if (trend.r2 > 0.5 and vr > 1.1) else "medium"
     action = "BUY" if direction > 0 else "SELL"
     return Stance(action=action, confidence=confidence,
@@ -195,6 +197,18 @@ def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=1.0):
     bs = bt.compute_stats(net_is, cost)
     return (bs.verdict == "edge",
             f"expanding edge@{t} dir={direction} {bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)")
+
+
+def _position_size(risk_cash, risk, entry, equity, max_leverage):
+    """Units to trade, capped by a leverage limit. Fixed-fractional sizing alone
+    (`risk_cash/risk`) blows up as the stop tightens (risk -> 0), demanding
+    notional far beyond equity. Cap at `max_leverage * equity / entry`; when the
+    cap binds, the ACTUAL cash at risk is size*risk. Returns (size, risk_cash)."""
+    size = risk_cash / risk if risk > 0 else 0.0
+    max_size = max_leverage * equity / entry if entry > 0 else size
+    if size > max_size:
+        return max_size, max_size * risk
+    return size, risk_cash
 
 
 def _resolve_exit(o, h, l, entry_i, horizon, direction, stop, target, n, slip=0.0):

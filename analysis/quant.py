@@ -285,12 +285,49 @@ def bootstrap_mean_ci_block(x: np.ndarray, expected_block: float = 10.0,
 # Regime — is the series trending or mean-reverting? A trend rule that looks
 # good only inside a trend is not an edge; regime tells you when to trust it.
 # --------------------------------------------------------------------------- #
-def variance_ratio(returns: np.ndarray, k: int) -> float:
+def _return_segments(times, gap_tol: float = 2.0):
+    """Index ranges (s,e) into the RETURNS array (len = len(times)-1) of consecutive
+    WITHIN-SESSION returns. A return spanning a time gap (dt > gap_tol*median step)
+    is a boundary, so overlapping k-sums never stitch across a session gap."""
+    t = np.asarray(times, dtype=float)
+    dt = np.diff(t)
+    pos = dt[dt > 0]
+    if pos.size == 0:
+        return [(0, dt.size)]
+    step = float(np.median(pos))
+    valid = dt <= gap_tol * step
+    segs, s = [], None
+    for i, v in enumerate(valid):
+        if v and s is None:
+            s = i
+        elif not v and s is not None:
+            segs.append((s, i)); s = None
+    if s is not None:
+        segs.append((s, valid.size))
+    return segs
+
+
+def _ksums(r: np.ndarray, k: int, segs=None):
+    """Overlapping k-bar sums, pooled WITHIN contiguous segments when `segs` given."""
+    if segs is None:
+        cs = np.cumsum(r)
+        return cs[k - 1:] - np.concatenate(([0.0], cs[:-k]))
+    out = []
+    for s, e in segs:
+        seg = r[s:e]
+        if seg.size >= k:
+            cs = np.cumsum(seg)
+            out.append(cs[k - 1:] - np.concatenate(([0.0], cs[:-k])))
+    return np.concatenate(out) if out else np.empty(0)
+
+
+def variance_ratio(returns: np.ndarray, k: int, times=None, gap_tol: float = 2.0) -> float:
     """
     Lo-MacKinlay variance ratio VR(k) = Var(k-bar return) / (k * Var(1-bar
     return)), overlapping estimator. VR ~ 1 random walk; VR > 1 positive serial
-    correlation (trending/momentum); VR < 1 mean reversion. A pure random walk
-    has no exploitable serial structure.
+    correlation (trending/momentum); VR < 1 mean reversion. When `times` (bar
+    timestamps aligned to `returns`) is given, k-sums are pooled only WITHIN
+    contiguous sessions so they never straddle a dropped gap.
     """
     r = np.asarray(returns, dtype=float)
     n = r.size
@@ -299,9 +336,10 @@ def variance_ratio(returns: np.ndarray, k: int) -> float:
     var1 = np.var(r, ddof=1)
     if var1 == 0:
         return float("nan")
-    # overlapping k-bar returns X_t = r_t + ... + r_{t-k+1}, length n-k+1
-    csum = np.cumsum(r)
-    ksum = csum[k - 1:] - np.concatenate(([0.0], csum[:-k]))
+    segs = _return_segments(times, gap_tol) if times is not None else None
+    ksum = _ksums(r, k, segs)
+    if ksum.size < 2:
+        return float("nan")
     vark = np.var(ksum, ddof=1)
     return float(vark / (k * var1))
 
@@ -310,14 +348,15 @@ def barrier_hit_probabilities(entry: float, o: np.ndarray, h: np.ndarray,
                               l: np.ndarray, c: np.ndarray, horizon: int,
                               stop: float, target: float, direction: int = 1,
                               drift_zero: bool = True, n: int = 20000,
-                              seed: int = 7) -> dict:
+                              seed: int = 7, expected_block: float = 5.0) -> dict:
     """
     Monte-Carlo FIRST-PASSAGE probabilities with INTRABAR extremes: over `horizon`
     bars, which barrier (target or stop) is touched FIRST. Resamples historical
-    bars jointly as (close return, high excursion, low excursion) so a barrier hit
-    WITHIN a bar counts — a close-only path understates the nearer barrier's hit
-    rate (usually the stop), biasing an EV gate upward. A bar that spans both
-    barriers is charged to the STOP (conservative). Returns p_target/p_stop/p_neither.
+    bars jointly as (close return, high excursion, low excursion) via the STATIONARY
+    BLOCK bootstrap, so the paths inherit the serial dependence (momentum) that Gate
+    A requires — an i.i.d. resample would erase it. Intrabar touches count; a bar
+    spanning both barriers is charged to the STOP (conservative). Returns
+    p_target/p_stop/p_neither.
     """
     c = np.asarray(c, dtype=float)
     if c.size < 2 or horizon < 1:
@@ -333,7 +372,7 @@ def barrier_hit_probabilities(entry: float, o: np.ndarray, h: np.ndarray,
     if m == 0:
         return {"p_target": float("nan"), "p_stop": float("nan"), "p_neither": float("nan")}
     rng = np.random.default_rng(seed)
-    idx = rng.integers(0, m, size=(n, horizon))
+    idx = stationary_bootstrap_indices(m, horizon, expected_block, n, rng)
     close_end = np.cumsum(rc[idx], axis=1)            # close level at END of each bar
     start = close_end - rc[idx]                       # level at START of each bar
     price_high = entry * np.exp(start + hi[idx])
@@ -397,27 +436,36 @@ def probabilistic_sharpe(returns: np.ndarray, benchmark: float = 0.0) -> float:
     return float(stats.norm.cdf(z)) if _HAS_SCIPY else float("nan")
 
 
-def variance_ratio_test(returns: np.ndarray, k: int) -> tuple:
+def variance_ratio_test(returns: np.ndarray, k: int, times=None,
+                        gap_tol: float = 2.0) -> tuple:
     """
     Lo-MacKinlay (1988) variance ratio with the HETEROSKEDASTICITY-ROBUST M2
     z-statistic. Returns (vr, z, p_two_sided). Under H0 (no serial correlation)
-    z ~ N(0,1); z>0 means VR>1 (momentum), z<0 mean reversion. This is what makes
-    a threshold meaningful: VR=1.01 with z=0.1 is noise, VR=1.01 with z=3 is not.
+    z ~ N(0,1); z>0 means VR>1 (momentum), z<0 mean reversion. When `times` is
+    given, the VR and the autocovariance sums are computed WITHIN contiguous
+    sessions only, so a dropped gap is never stitched across.
     """
     r = np.asarray(returns, dtype=float)
     n = r.size
     if n < k + 1 or k < 2:
         return (float("nan"), float("nan"), float("nan"))
-    vr = variance_ratio(r, k)
+    vr = variance_ratio(r, k, times=times, gap_tol=gap_tol)
     d = r - r.mean()
     d2 = d * d
     S = float(np.sum(d2))
     if S <= 0 or not np.isfinite(vr):
         return (vr, float("nan"), float("nan"))
+    segs = _return_segments(times, gap_tol) if times is not None else [(0, d2.size)]
     # theta*(k) = sum_{j=1}^{k-1} [2(k-j)/k]^2 * delta_j ,  delta_j = Σ d2_t d2_{t-j} / (Σ d2)^2
+    # with the lagged products summed only WITHIN each contiguous segment.
     theta = 0.0
     for j in range(1, k):
-        delta_j = float(np.sum(d2[j:] * d2[:-j])) / (S * S)
+        num = 0.0
+        for s, e in segs:
+            seg = d2[s:e]
+            if seg.size > j:
+                num += float(np.sum(seg[j:] * seg[:-j]))
+        delta_j = num / (S * S)
         w = 2.0 * (k - j) / k
         theta += (w * w) * delta_j
     if theta <= 0 or not np.isfinite(theta):

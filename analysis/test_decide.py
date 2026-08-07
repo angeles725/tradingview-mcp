@@ -87,6 +87,18 @@ def test_sizing_risks_fixed_fraction():
     _assert(abs(implied - st.risk_cash) < 1e-6, "size must risk exactly risk_cash")
 
 
+def test_position_size_leverage_cap():
+    # uncapped: size = risk_cash/risk, actual risk_cash unchanged
+    size, rc = d._position_size(100.0, 1.0, 100.0, 10_000.0, 100.0)
+    _assert(abs(size - 100.0) < 1e-9 and abs(rc - 100.0) < 1e-9, "uncapped sizing")
+    # a tiny stop distance would demand huge size -> leverage cap must bind
+    size2, rc2 = d._position_size(100.0, 0.01, 100.0, 10_000.0, 5.0)
+    max_size = 5.0 * 10_000.0 / 100.0                       # = 500 units
+    _assert(abs(size2 - max_size) < 1e-9, f"size must cap at {max_size}, got {size2}")
+    _assert(abs(rc2 - max_size * 0.01) < 1e-9, "capped risk_cash must equal size*risk")
+    _assert(size2 * 100.0 <= 5.0 * 10_000.0 + 1e-6, "notional must respect the leverage cap")
+
+
 def test_decide_sigma_override_skips_garch():
     # simulate_process refits GARCH once per `refit` window by passing a cached
     # sigma; decide must USE that override instead of re-fitting GARCH every bar.

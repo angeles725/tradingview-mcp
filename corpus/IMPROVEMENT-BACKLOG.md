@@ -115,13 +115,13 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
   `calibration` + `stats` report `mean_pinball` to rank the cones. Test `test_pit_and_pinball_scoring_rules`. **M / med-high**
 - **S7 overlapping forecasts treated as i.i.d.** — hook records h=4 every 30m; coverage averaged as independent →
   effective-n far below n, CI absent. Fix: non-overlapping records or Wilson CI on effective-n; dedupe. **S-M / med-high**
-- **S8 fixed-fractional sizing uncapped** — `decide.py:160` `size=risk_cash/risk` blows up as stop tightens. Fix:
-  leverage cap; optional fractional Kelly from the barrier EV already computed; vol-target risk_frac. **S-M / med-high**
-- **S9 barrier MC resamples i.i.d. — contradicts the VR>1 regime the trade requires** — use the stationary block
-  bootstrap for first-passage paths so they inherit momentum. **M / med**
-- **S10 VR/GARCH still stitch across dropped gaps** — gap-aware `log_returns` removes cross-gap returns but the
-  survivors become adjacent; VR k-sums and the GARCH recursion straddle the boundary. Fix: segment per contiguous
-  block, reset recursion at gaps. **M / med**
+- ~~**S8**~~ **[CERT] DONE 2026-08-07** — `_position_size` caps size at `max_leverage*equity/entry` (Config.max_leverage=10);
+  when the cap binds, reported `risk_cash = size*risk`. Test `test_position_size_leverage_cap`. (fractional Kelly still optional) **S-M / med-high**
+- ~~**S9**~~ **[CERT] DONE 2026-08-07** — `barrier_hit_probabilities` now draws paths via `stationary_bootstrap_indices`
+  (inherits momentum) instead of i.i.d. `rng.integers`. Test `test_barrier_uses_block_bootstrap`. **M / med**
+- ~~**S10**~~ **[CERT] DONE 2026-08-07** (VR) — `_return_segments` + `variance_ratio`/`variance_ratio_test` take `times`
+  and pool k-sums / autocovariances only WITHIN contiguous sessions; decide passes raw returns + times. Test
+  `test_variance_ratio_segments_across_gaps`. GARCH recursion-reset-at-gaps still a further refinement. **M / med**
 - **S11 stop (GARCH-scaled σ) vs target (bootstrap cone quantile) from different vol models → RR is an artifact**
   (`decide.py:126-139`). Fix: derive both barriers from the same distribution. **S-M / med**
 - ~~**S12**~~ **DONE 2026-08-07** — `_dir_hit` returns None unless `|p_up-0.5|>DIR_EPS(0.03)` and non-tie;
