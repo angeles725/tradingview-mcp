@@ -110,8 +110,9 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
 - ~~**S5**~~ **DONE 2026-08-07** — `barrier_hit_probabilities` now takes OHLC and resamples bars jointly as
   (close-return, high/low excursion), testing intrabar touches; a bar spanning both barriers is charged to the
   STOP (conservative). Gate C passes OHLC. Tests `test_barrier_hit_probabilities`, `test_barrier_intrabar_raises_stop_probability`. **M / high**
-- **S6 no proper scoring rule for calibration** — `forecast.py` records only band membership. Add PIT + pinball
-  (quantile) loss / CRPS from the 5 quantiles to actually rank gaussian vs bootstrap vs student_t. **M / med-high**
+- ~~**S6**~~ **DONE 2026-08-07** — `forecast.pit` (piecewise-linear CDF from the 5 quantiles) and
+  `forecast.pinball_loss` (strictly-proper quantile loss); `score_record` stores per-model `pit`/`pinball`;
+  `calibration` + `stats` report `mean_pinball` to rank the cones. Test `test_pit_and_pinball_scoring_rules`. **M / med-high**
 - **S7 overlapping forecasts treated as i.i.d.** — hook records h=4 every 30m; coverage averaged as independent →
   effective-n far below n, CI absent. Fix: non-overlapping records or Wilson CI on effective-n; dedupe. **S-M / med-high**
 - **S8 fixed-fractional sizing uncapped** — `decide.py:160` `size=risk_cash/risk` blows up as stop tightens. Fix:

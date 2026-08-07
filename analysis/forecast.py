@@ -60,6 +60,35 @@ def build_record(report: dict) -> dict:
 
 
 DIR_EPS = 0.03   # p_up must be this far from 0.5 to count as a directional call
+QUANTILE_LEVELS = (0.05, 0.25, 0.50, 0.75, 0.95)   # cone quantiles P5..P95
+
+
+def pit(levels, values, y: float) -> float:
+    """Probability Integral Transform: the forecast CDF (piecewise-linear through
+    the quantile knots) evaluated at the realized `y`. A calibrated model's PIT is
+    ~Uniform(0,1); a PIT histogram exposes bias / over- / under-dispersion."""
+    if y <= values[0]:
+        return float(levels[0])
+    if y >= values[-1]:
+        return float(levels[-1])
+    for i in range(1, len(values)):
+        if y <= values[i]:
+            lo_v, hi_v = values[i - 1], values[i]
+            lo_l, hi_l = levels[i - 1], levels[i]
+            frac = (y - lo_v) / (hi_v - lo_v) if hi_v > lo_v else 0.0
+            return float(lo_l + frac * (hi_l - lo_l))
+    return float(levels[-1])
+
+
+def pinball_loss(levels, values, y: float) -> float:
+    """Mean quantile (pinball) loss over the forecast quantiles — a STRICTLY
+    PROPER score, so it ranks cones (gaussian vs bootstrap vs student_t) honestly,
+    unlike band coverage (which a merely-wider cone always 'wins'). Lower is better."""
+    tot = 0.0
+    for tau, q in zip(levels, values):
+        d = y - q
+        tot += tau * d if d >= 0 else (tau - 1.0) * d
+    return tot / len(levels)
 
 
 def _dir_hit(realized_close: float, S0: float, p_up: float):
@@ -79,10 +108,13 @@ def score_record(rec: dict, realized_close: float) -> dict:
                 "ret_pct": 100.0 * (realized_close / S0 - 1.0) if S0 else 0.0,
                 "up": realized_close > S0, "models": {}}
     for m, c in rec["cones"].items():
+        qv = [c["P5"], c["P25"], c["P50"], c["P75"], c["P95"]]
         realized["models"][m] = {
             "in_90": c["P5"] <= realized_close <= c["P95"],
             "in_50": c["P25"] <= realized_close <= c["P75"],
             "dir_hit": _dir_hit(realized_close, S0, c["p_up"]),
+            "pit": pit(QUANTILE_LEVELS, qv, realized_close),
+            "pinball": pinball_loss(QUANTILE_LEVELS, qv, realized_close),
         }
     out = dict(rec)
     out["realized"] = realized
@@ -108,6 +140,9 @@ def calibration(records: list) -> dict:
         if dh:                                # only report direction when scored
             stat["dir_n"] = len(dh)
             stat["dir_acc"] = sum(dh) / len(dh)
+        pb = [x["pinball"] for x in rows if "pinball" in x]
+        if pb:                                # strictly-proper score for ranking
+            stat["mean_pinball"] = sum(pb) / len(pb)
         out["models"][m] = stat
     return out
 
@@ -185,10 +220,13 @@ def main():
     if args.cmd == "stats":
         cal = calibration(read_log(args.log))
         print(f"forecasts: {cal['n_scored']}/{cal['n_total']} scored  [{args.log}]")
-        print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'dir_acc':>12}")
+        print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'pinball':>10}{'dir_acc':>12}")
         for m, s in cal["models"].items():
             dir_s = f"{s['dir_acc']:.2f} (n={s['dir_n']})" if "dir_acc" in s else "n/a"
-            print(f"  {m:<14}{s['n']:>5}{s['cover_90']:>9.2f}{s['cover_50']:>9.2f}{dir_s:>12}")
+            pb_s = f"{s['mean_pinball']:.3f}" if "mean_pinball" in s else "n/a"
+            print(f"  {m:<14}{s['n']:>5}{s['cover_90']:>9.2f}{s['cover_50']:>9.2f}"
+                  f"{pb_s:>10}{dir_s:>12}")
+        print("  -> lower pinball = better-shaped cone (ranks the three models).")
         print("  -> cover90 should trend to ~0.90 and cover50 to ~0.50 if the cone")
         print("     is well-calibrated; persistently low coverage = vol underestimated.")
 

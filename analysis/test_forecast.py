@@ -51,6 +51,26 @@ def test_score_record_band_hits():
     _assert(s2["realized"]["models"]["student_t"]["in_90"], "106 inside student_t 90%")
 
 
+def test_pit_and_pinball_scoring_rules():
+    lv = [0.05, 0.25, 0.5, 0.75, 0.95]
+    vals = [90.0, 95.0, 100.0, 105.0, 110.0]
+    # PIT: median -> 0.5, tails clamp, monotone in y
+    _assert(abs(fc.pit(lv, vals, 100.0) - 0.5) < 1e-9, "median must map to PIT 0.5")
+    _assert(fc.pit(lv, vals, 80.0) <= 0.05, "below P5 -> low PIT")
+    _assert(fc.pit(lv, vals, 120.0) >= 0.95, "above P95 -> high PIT")
+    _assert(fc.pit(lv, vals, 97.0) < fc.pit(lv, vals, 103.0), "PIT monotone in y")
+    # pinball: strictly proper -> a far realized costs more than a near one
+    _assert(fc.pinball_loss(lv, vals, 200.0) > fc.pinball_loss(lv, vals, 100.0),
+            "worse forecast must have higher pinball loss")
+    _assert(fc.pinball_loss(lv, vals, 100.0) > 0, "pinball positive off the quantiles")
+    # calibration reports per-model mean pinball so cones can be RANKED
+    rec = fc.build_record(_report())
+    s1 = fc.score_record(rec, 100.0)
+    s2 = fc.score_record(rec, 101.0)
+    cal = fc.calibration([s1, s2])
+    _assert("mean_pinball" in cal["models"]["gaussian"], "calibration must report mean_pinball")
+
+
 def test_dir_hit_only_scored_for_directional_cones():
     # zero-drift cones sit at p_up ~ 0.5 -> no directional call (dir_hit None),
     # so dir_acc must not collapse to the base rate of up-moves.
