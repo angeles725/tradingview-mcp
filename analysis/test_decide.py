@@ -87,6 +87,19 @@ def test_sizing_risks_fixed_fraction():
     _assert(abs(implied - st.risk_cash) < 1e-6, "size must risk exactly risk_cash")
 
 
+def test_edge_precondition_direction_follows_slope():
+    # The feedback precondition must mirror the trade direction: a downtrend has
+    # to be validated with the SHORT rule, not a long edge (backlog #6 must not
+    # sneak back into simulate_process).
+    o, h, l, c = _trending_series(200, seed=0)          # strong uptrend
+    up = d._edge_precondition(o, h, l, c, 150, Config())
+    _assert("dir=1" in up[1], f"uptrend must use the long precondition: {up[1]}")
+    # reverse time -> a strong downtrend (per-bar OHLC still valid)
+    o2, h2, l2, c2 = o[::-1].copy(), h[::-1].copy(), l[::-1].copy(), c[::-1].copy()
+    dn = d._edge_precondition(o2, h2, l2, c2, 150, Config())
+    _assert("dir=-1" in dn[1], f"downtrend must use the short precondition: {dn[1]}")
+
+
 def test_edge_precondition_ignores_future_bars():
     # The historical feedback must not leak the future: the edge precondition used
     # to authorize a trade at bar t may only be validated on bars STRICTLY BEFORE

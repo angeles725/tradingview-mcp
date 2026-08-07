@@ -51,6 +51,27 @@ def test_score_record_band_hits():
     _assert(s2["realized"]["models"]["student_t"]["in_90"], "106 inside student_t 90%")
 
 
+def test_dir_hit_only_scored_for_directional_cones():
+    # zero-drift cones sit at p_up ~ 0.5 -> no directional call (dir_hit None),
+    # so dir_acc must not collapse to the base rate of up-moves.
+    rec = fc.build_record(_report())          # p_up 0.50 / 0.48 / 0.50
+    s = fc.score_record(rec, 105.0)
+    for m in fc.MODELS:
+        _assert(s["realized"]["models"][m]["dir_hit"] is None,
+                f"{m}: a ~0.5 p_up must not be scored for direction")
+    # a genuinely directional cone (p_up=0.7) IS scored
+    rec2 = fc.build_record(_report())
+    rec2["cones"]["gaussian"]["p_up"] = 0.7
+    up = fc.score_record(rec2, 105.0)         # up + bullish -> hit
+    dn = fc.score_record(rec2, 95.0)          # down + bullish -> miss
+    _assert(up["realized"]["models"]["gaussian"]["dir_hit"] is True, "up+bullish must hit")
+    _assert(dn["realized"]["models"]["gaussian"]["dir_hit"] is False, "down+bullish must miss")
+    cal = fc.calibration([up, dn, s])
+    g = cal["models"]["gaussian"]
+    _assert(g.get("dir_n") == 2, f"only directional records counted, got {g.get('dir_n')}")
+    _assert(abs(g["dir_acc"] - 0.5) < 1e-9, f"1 hit / 2 dir records = 0.5, got {g.get('dir_acc')}")
+
+
 def test_calibration_counts_coverage():
     rec = fc.build_record(_report())
     recs = [fc.score_record(rec, 100.0),   # dead center: in all bands

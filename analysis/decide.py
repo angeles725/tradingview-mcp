@@ -178,11 +178,16 @@ def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=1.0):
     enough history to close a trade, no edge is claimed and the process stays
     flat. This is the no-lookahead replacement for a single in-sample split.
     """
-    rule_sig = bt.rule_ema_trend(o[:t], h[:t], l[:t], c[:t], period=cfg.ema_period)
-    net_is, cost = bt.simulate(rule_sig, o[:t], c[:t], cfg.horizon, cost_bps)
+    # Direction must match the trend, so a SELL setup is validated on the SHORT
+    # rule (c<ema, short P&L) — not a counter-trend long edge (backlog #6).
+    direction = 1 if q.ols_trend(c[:t], cfg.r2_floor).slope > 0 else -1
+    rule_sig = bt.rule_ema_trend(o[:t], h[:t], l[:t], c[:t], period=cfg.ema_period,
+                                 direction=direction)
+    net_is, cost = bt.simulate(rule_sig, o[:t], c[:t], cfg.horizon, cost_bps,
+                               direction=direction)
     bs = bt.compute_stats(net_is, cost)
     return (bs.verdict == "edge",
-            f"expanding edge@{t}={bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)")
+            f"expanding edge@{t} dir={direction} {bs.verdict} (exp {bs.expectancy_bps:+.1f}bps)")
 
 
 def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None, times=None):

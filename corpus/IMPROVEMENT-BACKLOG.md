@@ -88,6 +88,58 @@ for f in analysis/test_*.py; do "$VENV" "$f"; done
 Fixes touching scipy paths (#10 GARCH, #12, #1 HAC) MUST be validated this way. Adding pytest to the
 venv (or a `make test` that uses it) is itself a P3 procedure improvement.
 
+## Second-pass audit (2026-08-07, after the 20-item hardening)
+Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go decision.
+
+### P1 — correctness bugs biasing the decision
+- ~~**S1**~~ **[CERT] DONE 2026-08-07** long-only edge precondition — `_edge_precondition` now derives
+  `direction` from `ols_trend(c[:t]).slope` and passes it to `rule_ema_trend` + `simulate`; detail shows
+  `dir=`. Test `test_edge_precondition_direction_follows_slope`. **S / high**
+- **S2 [CERT] gap-through fills credited at the stop** — `decide.py:219,222`: a bar that gaps past the stop
+  still exits at `st.stop`, an impossible fill that flatters the feedback. Fix: fill at `min(o[k], stop)`
+  (long) / `max(o[k], stop)` (short); add stop slippage. **S / high**
+- **S3 [INFER] frictionless execution overstates a bps-scale edge** — flat symmetric `cost_bps` (`backtest.py:114`,
+  Gate B hardcodes 1.0 `decide.py:113`); no spread, no slippage. Gold round-trip spread ~1.5-3 bps can flip
+  edge→no-edge. Fix: half-spread + slippage in ticks, symbol-configurable. **M / high**
+- **S4 [CERT] GARCH refit every bar in `simulate_process`** — `decide.py:126` fits GARCH per evaluated bar
+  (multi-start) → O(n²·starts), unusable as the store grows. Fix: throttle σ on the `refit` cadence or pass a
+  precomputed σ / EWMA fallback in the sim loop. **M / med-high**
+
+### P2 — methodology & robustness
+- **S5 barrier EV uses close-path (asymmetric) → Gate C EV biased up** — `quant.py` `barrier_hit_probabilities`;
+  nearer stop's crossings suppressed more than target's. Fix: Brownian-bridge / joint (return,range) intrabar test. **M / high**
+- **S6 no proper scoring rule for calibration** — `forecast.py` records only band membership. Add PIT + pinball
+  (quantile) loss / CRPS from the 5 quantiles to actually rank gaussian vs bootstrap vs student_t. **M / med-high**
+- **S7 overlapping forecasts treated as i.i.d.** — hook records h=4 every 30m; coverage averaged as independent →
+  effective-n far below n, CI absent. Fix: non-overlapping records or Wilson CI on effective-n; dedupe. **S-M / med-high**
+- **S8 fixed-fractional sizing uncapped** — `decide.py:160` `size=risk_cash/risk` blows up as stop tightens. Fix:
+  leverage cap; optional fractional Kelly from the barrier EV already computed; vol-target risk_frac. **S-M / med-high**
+- **S9 barrier MC resamples i.i.d. — contradicts the VR>1 regime the trade requires** — use the stationary block
+  bootstrap for first-passage paths so they inherit momentum. **M / med**
+- **S10 VR/GARCH still stitch across dropped gaps** — gap-aware `log_returns` removes cross-gap returns but the
+  survivors become adjacent; VR k-sums and the GARCH recursion straddle the boundary. Fix: segment per contiguous
+  block, reset recursion at gaps. **M / med**
+- **S11 stop (GARCH-scaled σ) vs target (bootstrap cone quantile) from different vol models → RR is an artifact**
+  (`decide.py:126-139`). Fix: derive both barriers from the same distribution. **S-M / med**
+- ~~**S12**~~ **DONE 2026-08-07** — `_dir_hit` returns None unless `|p_up-0.5|>DIR_EPS(0.03)` and non-tie;
+  `calibration` reports `dir_acc`/`dir_n` only over directional records (n/a otherwise); stats print updated.
+  Test `test_dir_hit_only_scored_for_directional_cones`. **S / med**
+- **S13 stale-quote / zero-volume / forming-bar not detected** — `collect.valid_ohlc` checks structure only; a feed
+  stall (identical closes) deflates σ and drags VR<1. Fix: flag zero-volume/zero-range/identical runs; exclude the
+  forming last bar. **S-M / med**
+- **S14 [CERT] `forecasts.jsonl` full-rewrite + no lock → detached hook jobs can race and drop records** —
+  `forecast.py write_log` rebuilds from a pre-append snapshot. Fix: `fcntl.flock` around read-modify-write, or
+  append-only outcomes sidecar; dedupe by `made_at_unix`. **S / med**
+
+### P3 — hygiene
+- **S15 `confidence` label ad-hoc** (`decide.py:162`) — tie it to block-CI margin / PSR / EV. **S / low-med**
+- **S16 MC sampling error invisible on the hard EV gate** (single seed, `EV>0`) — report MC SE of p_target/p_stop/EV
+  and require EV to clear zero by more than its SE. **S / low-med**
+
+### Still solid (do NOT touch)
+No-lookahead fills; BH-FDR multiple testing; Wilson + Politis-Romano block + BCa CI machinery; `valid_ohlc` +
+atomic store writes.
+
 ## Suggested sequencing
 Quick wins first (all S-effort, each removes a real bias): **#6, #2, #4, #12, #15**. Then validity of the
 whole pipeline: **#1, #3, #5**. Then P2 method upgrades. Every fix lands with a test (strict TDD).

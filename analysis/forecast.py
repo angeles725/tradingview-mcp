@@ -59,6 +59,19 @@ def build_record(report: dict) -> dict:
     }
 
 
+DIR_EPS = 0.03   # p_up must be this far from 0.5 to count as a directional call
+
+
+def _dir_hit(realized_close: float, S0: float, p_up: float):
+    """Directional hit, or None when the cone makes no real directional call.
+    Zero-drift cones sit at p_up ~ 0.5, so scoring direction there just recovers
+    the base rate of up-moves (not skill); exact ties (realized == S0) are also
+    undefined. Only |p_up - 0.5| > DIR_EPS and a non-tie realized are scored."""
+    if abs(p_up - 0.5) <= DIR_EPS or realized_close == S0:
+        return None
+    return (realized_close > S0) == (p_up > 0.5)
+
+
 def score_record(rec: dict, realized_close: float) -> dict:
     """Attach realized outcome + per-model band hits. Idempotent."""
     S0 = rec["S0"]
@@ -69,9 +82,7 @@ def score_record(rec: dict, realized_close: float) -> dict:
         realized["models"][m] = {
             "in_90": c["P5"] <= realized_close <= c["P95"],
             "in_50": c["P25"] <= realized_close <= c["P75"],
-            # directional call was right if the median side matched (zero-drift
-            # cones sit ~flat, so this is mostly a tie-breaker, recorded for honesty)
-            "dir_hit": (realized_close > S0) == (c["p_up"] >= 0.5),
+            "dir_hit": _dir_hit(realized_close, S0, c["p_up"]),
         }
     out = dict(rec)
     out["realized"] = realized
@@ -88,12 +99,16 @@ def calibration(records: list) -> dict:
         if not rows:
             continue
         n = len(rows)
-        out["models"][m] = {
+        stat = {
             "n": n,
             "cover_90": sum(x["in_90"] for x in rows) / n,
             "cover_50": sum(x["in_50"] for x in rows) / n,
-            "dir_acc": sum(x["dir_hit"] for x in rows) / n,
         }
+        dh = [x["dir_hit"] for x in rows if x["dir_hit"] is not None]
+        if dh:                                # only report direction when scored
+            stat["dir_n"] = len(dh)
+            stat["dir_acc"] = sum(dh) / len(dh)
+        out["models"][m] = stat
     return out
 
 
@@ -170,10 +185,10 @@ def main():
     if args.cmd == "stats":
         cal = calibration(read_log(args.log))
         print(f"forecasts: {cal['n_scored']}/{cal['n_total']} scored  [{args.log}]")
-        print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'dir_acc':>9}")
+        print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'dir_acc':>12}")
         for m, s in cal["models"].items():
-            print(f"  {m:<14}{s['n']:>5}{s['cover_90']:>9.2f}{s['cover_50']:>9.2f}"
-                  f"{s['dir_acc']:>9.2f}")
+            dir_s = f"{s['dir_acc']:.2f} (n={s['dir_n']})" if "dir_acc" in s else "n/a"
+            print(f"  {m:<14}{s['n']:>5}{s['cover_90']:>9.2f}{s['cover_50']:>9.2f}{dir_s:>12}")
         print("  -> cover90 should trend to ~0.90 and cover50 to ~0.50 if the cone")
         print("     is well-calibrated; persistently low coverage = vol underestimated.")
 
