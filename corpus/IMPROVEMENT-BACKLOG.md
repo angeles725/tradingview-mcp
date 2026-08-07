@@ -130,6 +130,22 @@ help on gold 15m; simpler is better here. Backfill logs are regenerable backtest
 - **Method gap found:** pinball loss is in PRICE units (BTC ~42, gold ~3, EURUSD ~0.000) → NOT comparable across
   symbols/horizons. Normalize (per S0 / in bps) for cross-symbol model ranking. *(new method item)*
 
+## Adaptive-vol investigation (Task #3, 2026-08-07 — NO CHANGE warranted)
+Tested whether a better/adaptive horizon vol fixes the under-coverage. Out-of-sample (validate) cover90 of a
+gaussian cone, close-to-close (EWMA) vs Garman-Klass RANGE vol:
+
+| symbol | n | cover90 close | cover90 GK |
+|---|---|---|---|
+| gold | 105 | 0.88 | 0.88 |
+| EURUSD | 59 | 0.92 | 0.92 |
+| SPX | 59 | 0.96 | 0.92 |
+| BTC | 59 | 0.92 | 0.92 |
+
+**Conclusion:** on recent / out-of-sample data the cones are ALREADY well-calibrated (0.88–0.92); gold's
+full-sample 0.82 was a past high-vol regime, not persistent (recent gold = 0.88). GK-vol shows no clear gain
+(e.g. SPX 0.96→0.92 is ~1 forecast at n≈23 — noise). **No adaptive-vol change is justified by the evidence** —
+adding one would be the overfit we keep refusing. The honest surface is the realized-coverage report (Task #2).
+
 ## Second-pass audit (2026-08-07, after the 20-item hardening)
 Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go decision.
 
