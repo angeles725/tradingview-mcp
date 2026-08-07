@@ -102,13 +102,14 @@ Fresh findings NOT in the DONE rows above. Ranked by impact on the go/no-go deci
   (limit); `Config.cost_bps`/`slip_frac` added; Gate B uses `cfg.cost_bps` (no longer hardcoded 1.0);
   `simulate_process` passes `cfg.slip_frac`. Defaults conservative (knob exposed; set gold-realistic values).
   Test `test_resolve_exit_applies_stop_slippage`. **M / high** (spread/slippage per-side in backtest.simulate CLI still tunable)
-- **S4 [CERT] GARCH refit every bar in `simulate_process`** — `decide.py:126` fits GARCH per evaluated bar
-  (multi-start) → O(n²·starts), unusable as the store grows. Fix: throttle σ on the `refit` cadence or pass a
-  precomputed σ / EWMA fallback in the sim loop. **M / med-high**
+- ~~**S4**~~ **[CERT] DONE 2026-08-07** GARCH refit every bar — `decide` gained `sigma_override`;
+  `simulate_process` fits GARCH once per `refit` window and passes it, throttling O(n) fits to O(n/refit).
+  Test `test_decide_sigma_override_skips_garch`. **M / med-high**
 
 ### P2 — methodology & robustness
-- **S5 barrier EV uses close-path (asymmetric) → Gate C EV biased up** — `quant.py` `barrier_hit_probabilities`;
-  nearer stop's crossings suppressed more than target's. Fix: Brownian-bridge / joint (return,range) intrabar test. **M / high**
+- ~~**S5**~~ **DONE 2026-08-07** — `barrier_hit_probabilities` now takes OHLC and resamples bars jointly as
+  (close-return, high/low excursion), testing intrabar touches; a bar spanning both barriers is charged to the
+  STOP (conservative). Gate C passes OHLC. Tests `test_barrier_hit_probabilities`, `test_barrier_intrabar_raises_stop_probability`. **M / high**
 - **S6 no proper scoring rule for calibration** — `forecast.py` records only band membership. Add PIT + pinball
   (quantile) loss / CRPS from the 5 quantiles to actually rank gaussian vs bootstrap vs student_t. **M / med-high**
 - **S7 overlapping forecasts treated as i.i.d.** — hook records h=4 every 30m; coverage averaged as independent →

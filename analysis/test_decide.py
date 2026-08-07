@@ -87,6 +87,29 @@ def test_sizing_risks_fixed_fraction():
     _assert(abs(implied - st.risk_cash) < 1e-6, "size must risk exactly risk_cash")
 
 
+def test_decide_sigma_override_skips_garch():
+    # simulate_process refits GARCH once per `refit` window by passing a cached
+    # sigma; decide must USE that override instead of re-fitting GARCH every bar.
+    import quant as q
+    o, h, l, c = _trending_series(200, seed=0)
+    cfg = Config(min_rr=0.0)
+    orig = q.garch11_vol
+    calls = {"n": 0}
+    try:
+        def counting(*a, **k):
+            calls["n"] += 1
+            return orig(*a, **k)
+        q.garch11_vol = counting
+        d.decide(o, h, l, c, cfg, edge_override=(True, "e"))               # reaches Gate C
+        base = calls["n"]
+        d.decide(o, h, l, c, cfg, edge_override=(True, "e"), sigma_override=0.008)
+        extra = calls["n"] - base
+    finally:
+        q.garch11_vol = orig
+    _assert(base >= 1, "baseline decide should fit GARCH at Gate C")
+    _assert(extra == 0, f"sigma_override must skip the GARCH fit, got {extra} extra")
+
+
 def test_edge_precondition_direction_follows_slope():
     # The feedback precondition must mirror the trade direction: a downtrend has
     # to be validated with the SHORT rule, not a long edge (backlog #6 must not

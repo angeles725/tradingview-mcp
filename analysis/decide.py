@@ -81,7 +81,8 @@ def _no_trade(reason, gates, confidence="none"):
     return Stance(action="NO-TRADE", confidence=confidence, reason=reason, gates=gates)
 
 
-def decide(o, h, l, c, cfg: Config, edge_override=None, times=None) -> Stance:
+def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
+           sigma_override=None) -> Stance:
     """Return a Stance. edge_override lets the historical sim skip the (slow)
     per-bar backtest by supplying a precomputed edge decision for Gate B."""
     gates: list = []
@@ -126,8 +127,11 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None) -> Stance:
         return _no_trade("no cost-surviving edge in this direction (Gate B)", gates)
 
     # --- Gate C: risk/reward from the volatility cone ------------------------
-    sigma_bar = q.garch11_vol(ret)
-    sigma_bar = sigma_bar[0] if sigma_bar else q.ewma_vol(ret)
+    if sigma_override is not None:
+        sigma_bar = sigma_override          # throttled fit from simulate_process
+    else:
+        sigma_bar = q.garch11_vol(ret)
+        sigma_bar = sigma_bar[0] if sigma_bar else q.ewma_vol(ret)
     # Scale to the horizon honoring serial correlation at that horizon; Gate A
     # already established VR>1, so sqrt(h) alone would understate horizon vol.
     vr_h = q.variance_ratio(ret, cfg.horizon)
@@ -146,7 +150,7 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None) -> Stance:
     # First-passage EV: RR alone ignores that the stop may be touched FIRST far
     # more often than the target. Require a favourable RR AND positive expected
     # value from the barrier-hit probabilities.
-    bp = q.barrier_hit_probabilities(entry, ret, cfg.horizon, stop, target, direction)
+    bp = q.barrier_hit_probabilities(entry, o, h, l, c, cfg.horizon, stop, target, direction)
     ev = bp["p_target"] * reward - bp["p_stop"] * risk
     c_ok = rr >= cfg.min_rr and np.isfinite(ev) and ev > 0
     gates.append(asdict(Gate("C_risk_reward", c_ok,
@@ -222,6 +226,7 @@ def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None, times=No
     if refit is None:
         refit = max(cfg.horizon, 10)
     edge_override = (False, "insufficient history")
+    sigma_ref = None
     last_fit = -(10 ** 9)
 
     actions = {"BUY": 0, "SELL": 0, "NO-TRADE": 0}
@@ -230,9 +235,16 @@ def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None, times=No
     for t in range(warmup, n - cfg.horizon):
         if t - last_fit >= refit:
             edge_override = _edge_precondition(o, h, l, c, t, cfg, cost_bps)
+            # Throttle the (expensive multi-start) GARCH fit to the same cadence
+            # instead of re-fitting every bar — O(n^2·starts) otherwise.
+            ret_t = q.log_returns(c[:t + 1],
+                                  times=(times[:t + 1] if times is not None else None))
+            g = q.garch11_vol(ret_t)
+            sigma_ref = g[0] if g else q.ewma_vol(ret_t)
             last_fit = t
         st = decide(o[:t + 1], h[:t + 1], l[:t + 1], c[:t + 1], cfg, edge_override,
-                    times=(times[:t + 1] if times is not None else None))
+                    times=(times[:t + 1] if times is not None else None),
+                    sigma_override=sigma_ref)
         actions[st.action] += 1
         if st.action == "NO-TRADE" or t + 1 <= busy_until:
             continue

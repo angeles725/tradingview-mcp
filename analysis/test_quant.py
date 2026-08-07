@@ -197,20 +197,34 @@ def test_garch_recovers_persistence_with_student_t():
 
 
 def test_barrier_hit_probabilities():
-    # First-passage MC: which barrier is touched FIRST, not just the terminal side.
+    # First-passage MC over OHLC bars: which barrier is touched FIRST (intrabar).
     rng = np.random.default_rng(0)
-    r = rng.normal(0.0, 0.01, 500)
-    entry = 100.0
-    bp = q.barrier_hit_probabilities(entry, r, 20, stop=98.0, target=102.0, direction=1)
+    c = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.005, 500)))
+    o = c.copy(); h = c * 1.001; l = c * 0.999      # small symmetric intrabar range
+    entry = float(c[-1])
+    bp = q.barrier_hit_probabilities(entry, o, h, l, c, 20,
+                                     stop=entry * 0.98, target=entry * 1.02, direction=1)
     _assert(0 <= bp["p_target"] <= 1 and 0 <= bp["p_stop"] <= 1, "probs in range")
     _assert(abs(bp["p_target"] + bp["p_stop"] + bp["p_neither"] - 1.0) < 1e-9, "sum to 1")
-    # symmetric barriers under zero drift -> roughly equal hit probabilities
-    _assert(abs(bp["p_target"] - bp["p_stop"]) < 0.08,
+    _assert(abs(bp["p_target"] - bp["p_stop"]) < 0.10,
             f"symmetric barriers should be ~equal, got {bp}")
-    # a NEARER target must be hit first more often than a far one
-    near = q.barrier_hit_probabilities(entry, r, 20, 98.0, 101.0, 1)
-    far = q.barrier_hit_probabilities(entry, r, 20, 98.0, 104.0, 1)
+    near = q.barrier_hit_probabilities(entry, o, h, l, c, 20, entry * 0.98, entry * 1.01, 1)
+    far = q.barrier_hit_probabilities(entry, o, h, l, c, 20, entry * 0.98, entry * 1.04, 1)
     _assert(near["p_target"] > far["p_target"], "nearer target should hit more often")
+
+
+def test_barrier_intrabar_raises_stop_probability():
+    # Wider intrabar ranges must touch the stop MORE often than a close-only path;
+    # zero-range bars must reduce to the close path.
+    rng = np.random.default_rng(1)
+    c = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.004, 400)))
+    entry = float(c[-1]); stop = entry * 0.99; target = entry * 1.02
+    zero = q.barrier_hit_probabilities(entry, c.copy(), c.copy(), c.copy(), c, 20,
+                                       stop, target, 1)      # H=L=C -> close path
+    wide = q.barrier_hit_probabilities(entry, c.copy(), c * 1.004, c * 0.996, c, 20,
+                                       stop, target, 1)      # +/-0.4% intrabar
+    _assert(wide["p_stop"] > zero["p_stop"],
+            f"intrabar range must raise stop-hit prob: wide {wide['p_stop']} vs {zero['p_stop']}")
 
 
 def test_max_drawdown_and_probabilistic_sharpe():

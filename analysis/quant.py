@@ -306,39 +306,52 @@ def variance_ratio(returns: np.ndarray, k: int) -> float:
     return float(vark / (k * var1))
 
 
-def barrier_hit_probabilities(entry: float, returns: np.ndarray, horizon: int,
+def barrier_hit_probabilities(entry: float, o: np.ndarray, h: np.ndarray,
+                              l: np.ndarray, c: np.ndarray, horizon: int,
                               stop: float, target: float, direction: int = 1,
                               drift_zero: bool = True, n: int = 20000,
                               seed: int = 7) -> dict:
     """
-    Monte-Carlo FIRST-PASSAGE probabilities: over `horizon` bars, which barrier
-    (target or stop) is touched FIRST. Resamples historical log-returns (zero
-    drift by default) into price paths and checks the barriers bar by bar. A raw
-    reward:risk ratio ignores this: a 1.5:1 setup whose stop is far likelier to
-    trigger first is not favourable. Uses close-path prices (no intrabar extremes),
-    so hit probabilities are mild UNDER-estimates. Returns p_target/p_stop/p_neither.
+    Monte-Carlo FIRST-PASSAGE probabilities with INTRABAR extremes: over `horizon`
+    bars, which barrier (target or stop) is touched FIRST. Resamples historical
+    bars jointly as (close return, high excursion, low excursion) so a barrier hit
+    WITHIN a bar counts — a close-only path understates the nearer barrier's hit
+    rate (usually the stop), biasing an EV gate upward. A bar that spans both
+    barriers is charged to the STOP (conservative). Returns p_target/p_stop/p_neither.
     """
-    r = np.asarray(returns, dtype=float)
-    if r.size == 0 or horizon < 1:
+    c = np.asarray(c, dtype=float)
+    if c.size < 2 or horizon < 1:
         return {"p_target": float("nan"), "p_stop": float("nan"), "p_neither": float("nan")}
+    prev = c[:-1]
+    rc = np.log(c[1:] / prev)                         # close-to-close return
+    hi = np.log(np.asarray(h, float)[1:] / prev)      # high excursion vs prev close
+    lo = np.log(np.asarray(l, float)[1:] / prev)      # low excursion vs prev close
     if drift_zero:
-        r = r - r.mean()
+        mu = rc.mean()
+        rc, hi, lo = rc - mu, hi - mu, lo - mu        # shift the whole bar by its drift
+    m = rc.size
+    if m == 0:
+        return {"p_target": float("nan"), "p_stop": float("nan"), "p_neither": float("nan")}
     rng = np.random.default_rng(seed)
-    draws = rng.choice(r, size=(n, horizon), replace=True)
-    price = entry * np.exp(np.cumsum(draws, axis=1))
+    idx = rng.integers(0, m, size=(n, horizon))
+    close_end = np.cumsum(rc[idx], axis=1)            # close level at END of each bar
+    start = close_end - rc[idx]                       # level at START of each bar
+    price_high = entry * np.exp(start + hi[idx])
+    price_low = entry * np.exp(start + lo[idx])
     if direction > 0:
-        hit_t, hit_s = price >= target, price <= stop
+        hit_t, hit_s = price_high >= target, price_low <= stop
     else:
-        hit_t, hit_s = price <= target, price >= stop
+        hit_t, hit_s = price_low <= target, price_high >= stop
 
     def _first(mask):
-        idx = np.argmax(mask, axis=1)
-        idx[~mask.any(axis=1)] = horizon          # no hit -> sentinel past the end
-        return idx
+        idx_ = np.argmax(mask, axis=1)
+        idx_[~mask.any(axis=1)] = horizon             # no hit -> sentinel past the end
+        return idx_
 
     it, istop = _first(hit_t), _first(hit_s)
+    both_same = (it == istop) & (it < horizon)        # bar spans both -> charge to stop
+    p_stop = float(np.mean((istop < it) | both_same))
     p_target = float(np.mean(it < istop))
-    p_stop = float(np.mean(istop < it))
     return {"p_target": p_target, "p_stop": p_stop,
             "p_neither": float(1.0 - p_target - p_stop)}
 
