@@ -274,9 +274,24 @@ forex/index microstructure is mean-reverting, not momentum, so Gate A (wants `VR
 feed) is not entitled on this account. Confirms the hardened engine's honest default across assets: flat is a
 position.
 
+### P2 — timeframe-scope miscalibration (surfaced by a higher-TF live screen)
+- ~~**T5**~~ **[CERT] DONE 2026-08-07** — the gap-awareness (`_return_segments` + `log_returns(times=)`,
+  `gap_tol=2×median_step`) was built for INTRADAY session gaps and misfired on **daily+** timeframes: a
+  weekend is a ~3× step, so on gold DAILY (300 bars, +29.4%/14mo) **60/299 = 20% of legitimate daily returns
+  were dropped**, `variance_ratio` fragmented into ~5-bar weekly segments (**VR8 → nan** at k=8), and the drift
+  test lost power (n 299→239, t +0.92→+0.66). It did NOT flip a decision — gold daily is correctly NO-TRADE
+  either way (the #1 guard: OLS-slope t=6.07 is the spurious I(1) statistic, the stationary drift t≈0.7–0.9 is
+  honest and sub-significant) — but it nan'd the VR diagnostics and discarded real daily data. Fix: gate the
+  gap-exclusion on an intraday cadence (`median step < _INTRADAY_STEP_MAX = 86400s`); daily+ series stay one
+  segment / keep all returns. Verified on live gold daily: **VR8 nan → 0.88**, 0 returns dropped, verdict
+  unchanged. Tests `test_log_returns_keeps_weekend_returns_on_daily`,
+  `test_return_segments_not_fragmented_on_daily`, `test_variance_ratio_computable_on_daily_with_weekends`
+  (intraday paths asserted unchanged). Commit `d59de86`. **S / med** *(surfaced by the 1h+D live screen)*
+
 ### Still solid (do NOT touch)
 Everything on the first two passes' "do not touch" lists; the segmented numerator (S10) was correct — only its
-denominator counterpart was missing (T1).
+denominator counterpart was missing (T1). The intraday gap heuristic itself is correct — T5 only bounded its
+SCOPE to intraday cadences.
 
 ## Suggested sequencing
 Quick wins first (all S-effort, each removes a real bias): **#6, #2, #4, #12, #15**. Then validity of the
