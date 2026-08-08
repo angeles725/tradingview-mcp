@@ -350,6 +350,33 @@ VR-scaled) — this is intentional: the cone is calibration/display only, Gate C
 `mc_block` + barriers, and the under-coverage was investigated exhaustively (no static fix; realized-coverage
 reporting instead). No action.
 
+## Gold-tail investigation (2026-08-08 — NO fix warranted, robust multi-asset evidence)
+The prior calibration work claimed "the 90% under-coverage is gold-specific" from a small cross-symbol test.
+This pass made it ROBUST: a one-command multi-asset backfill (`backfill.py --store analysis/data --symbols …`,
+new `backfill_bars()` + tests) produced **400 non-overlapping, no-lookahead forecasts across 6 assets** (h=4/1h
+on 15m). Gaussian cover90: **XAUUSD 0.82 (UNDER, CI [0.73,0.88] — 0.90 is outside, so real not noise)**; EURUSD
+0.92, SPX500USD 0.90, USDJPY 0.93, GBPUSD 0.93, AUDUSD 0.92 (all OK). Pooled 0.89, dragged down only by gold.
+Gold also has the worst-shaped cone (pinball 7.4 bps vs 1.2–2.9). All three cones fail equally on gold
+(gaussian/bootstrap/student_t = 0.82/0.80/0.82), so it is NOT a tail-SHAPE problem — the whole band is too narrow.
+
+Then an estimator sweep (analytic zero-drift band `z·σ·√h`, same windows) tested seven per-bar σ estimators for
+gold's cover90 and their COST to the other five:
+| candidate | XAU | EUR | SPX | JPY | GBP | AUD |
+|---|---|---|---|---|---|---|
+| base (GARCH, gap-filtered) | 0.83 | 0.92 | 0.90 | 0.93 | 0.93 | 0.92 |
+| raw c2c (keeps gaps) | 0.86 | 0.92 | 0.92 | 0.88 | 0.98 | 0.93 |
+| ewma raw / parkinson / GK | 0.85 | 0.92 | 0.90 | 0.88 | 0.98 | 0.92 |
+| base ×1.15 | 0.87 | 0.93 | 0.97 | 0.97 | 0.95 | 0.93 |
+| base ×1.30 | **0.93** | 0.95 | 0.98 | 0.97 | 0.97 | 0.95 |
+
+**Conclusion: no static GLOBAL fix exists.** The only thing that lifts gold to 0.90 (×1.30) over-covers all five
+already-calibrated assets (cover50 balloons to 0.71–0.80). Range estimators barely help gold (0.85) and push
+GBPUSD to 0.98. Gold's gap is a genuine asset-specific fat-tail/jump property. Since the cone is display/calibration
+ONLY (Gate C decides on `mc_block` + barriers, not this cone), the bounded cost does not justify a per-asset vol
+multiplier — a tuning knob that would risk overfitting n=105. **Decision (user-approved 2026-08-08): document,
+do NOT fix.** Rely on the realized-coverage reporting, which now carries robust multi-asset backfill evidence.
+This EXTENDS the Task #3 "adaptive-vol — NO CHANGE warranted" finding to the tail specifically.
+
 ## Suggested sequencing
 Quick wins first (all S-effort, each removes a real bias): **#6, #2, #4, #12, #15**. Then validity of the
 whole pipeline: **#1, #3, #5**. Then P2 method upgrades. Every fix lands with a test (strict TDD).
