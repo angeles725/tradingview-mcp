@@ -69,14 +69,16 @@ nohup bash -c "
     if [ \$multi -eq 1 ]; then '$NODE' src/cli/index.js symbol \"\$sym\" >>'$LOG' 2>&1; sleep 3; fi
     PULL=\$(mktemp)
     '$NODE' src/cli/index.js ohlcv --count 300 >\"\$PULL\" 2>>'$LOG'
-    # (a) accumulate history  (b) record a next-hour forecast  (c) score matured
+    # (a) accumulate history  (b) record a next-hour forecast
     '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
     '$PY' analysis/analyze.py --symbol \"\$sym\" --tf '$TF' --horizon '$HORIZON' --json <\"\$PULL\" 2>>'$LOG' \
       | '$PY' analysis/forecast.py record >>'$LOG' 2>&1
-    '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' --emit 2>>'$LOG' \
-      | '$PY' analysis/forecast.py score >>'$LOG' 2>&1
     rm -f \"\$PULL\"
   done
+  # (c) score ALL matured forecasts in ONE symbol-correct pass: each record is
+  # matched against ITS OWN symbol/tf store, so a multi-symbol log never scores
+  # one symbol against another's bars, and off-live-window forecasts still score.
+  '$PY' analysis/forecast.py score --store '$DATA' >>'$LOG' 2>&1
   # restore the primary chart if we cycled symbols
   [ \$multi -eq 1 ] && '$NODE' src/cli/index.js symbol \"\$primary\" >>'$LOG' 2>&1
   echo \"[\$(date '+%F %T')] collect+forecast tick done (\${#syms[@]} sym)\" >>'$LOG'
