@@ -51,6 +51,44 @@ def test_score_record_band_hits():
     _assert(s2["realized"]["models"]["student_t"]["in_90"], "106 inside student_t 90%")
 
 
+def test_score_pending_from_store_is_symbol_correct():
+    # A matured forecast that fell off the live window must score against ITS OWN
+    # symbol's persistent store — never another symbol's bars at the same time.
+    import collect
+    gold = _report(); gold["symbol"] = "OANDA:XAUUSD"
+    eur = _report();  eur["symbol"] = "OANDA:EURUSD"
+    recs = [fc.build_record(gold), fc.build_record(eur)]
+    target = recs[0]["target_unix"]                       # same maturity time
+    with tempfile.TemporaryDirectory() as d:
+        # two stores, DIFFERENT close at the target time
+        for sym, close in (("OANDA:XAUUSD", 103.0), ("OANDA:EURUSD", 97.0)):
+            path = collect.store_path(d, sym, "15")
+            bars = [{"time": target, "open": close, "high": close, "low": close,
+                     "close": close, "volume": 1}]
+            collect.save_store(path, bars)
+        out, n = fc.score_pending(recs, store_dir=d)
+        _assert(n == 2, f"both matured records should score, got {n}")
+        g = out[0]["realized"]; e = out[1]["realized"]
+        _assert(g is not None and abs(g["close"] - 103.0) < 1e-9,
+                f"gold scored against gold store: {g}")
+        _assert(e is not None and abs(e["close"] - 97.0) < 1e-9,
+                f"eur scored against eur store (NOT gold's 103): {e}")
+
+
+def test_score_pending_symbol_filter_prevents_cross_scoring():
+    # With a single-symbol bars window, only matching-symbol records may score.
+    gold = _report(); gold["symbol"] = "OANDA:XAUUSD"
+    eur = _report();  eur["symbol"] = "OANDA:EURUSD"
+    recs = [fc.build_record(gold), fc.build_record(eur)]
+    target = recs[0]["target_unix"]
+    bars = [{"time": target, "open": 103.0, "high": 103.0, "low": 103.0,
+             "close": 103.0, "volume": 1}]
+    out, n = fc.score_pending(recs, bars=bars, symbol="OANDA:XAUUSD")
+    _assert(n == 1, f"only the gold record should score, got {n}")
+    _assert(out[0]["realized"] is not None, "gold scored")
+    _assert(out[1]["realized"] is None, "eur must NOT be scored against gold bars")
+
+
 def test_dedupe_effective_n_and_wilson():
     # exact duplicates (same symbol/tf/made/horizon) must collapse
     r1 = fc.score_record(fc.build_record(_report()), 100.0)

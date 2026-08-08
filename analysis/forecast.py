@@ -283,12 +283,62 @@ def _bars_from_stdin() -> list:
     return payload.get("bars") or payload.get("ohlcv") or []
 
 
+def _store_bars(store_dir: str, symbol: str, tf: str) -> list:
+    """Load collect.py's persistent CSV store for (symbol, tf) as a time-sorted
+    bars list. Empty list when no store exists for that symbol/timeframe."""
+    import collect
+    rows = list(collect.load_store(collect.store_path(store_dir, symbol, str(tf))).values())
+    rows.sort(key=lambda r: r["time"])
+    return rows
+
+
+def score_pending(records: list, bars: list = None, store_dir: str = None,
+                  symbol: str = None) -> tuple:
+    """Score every unrealized record in place and return (records, n_scored).
+
+    Two sources, so a matured forecast is never lost or mis-scored:
+      - store_dir: score each record against ITS OWN symbol+tf persistent store
+        (collect.py). Symbol-correct by construction, and it covers forecasts that
+        have scrolled off the ~300-bar live window.
+      - bars: a single live window. Because nearest_close matches on TIME ONLY, a
+        multi-symbol log would otherwise score one symbol against another's bars —
+        so a `symbol` filter is REQUIRED-in-spirit here: pass it to restrict which
+        records these bars may realize.
+    """
+    n = 0
+    cache = {}
+    for i, r in enumerate(records):
+        if r.get("realized"):
+            continue
+        if symbol is not None and r.get("symbol") != symbol:
+            continue
+        if store_dir is not None:
+            key = (r["symbol"], str(r["tf"]))
+            if key not in cache:
+                cache[key] = _store_bars(store_dir, r["symbol"], r["tf"])
+            src = cache[key]
+        else:
+            src = bars or []
+        tol = max(int(r.get("bar_step_sec") or 0) // 2, 1)
+        rc = nearest_close(src, int(r["target_unix"]), tol)
+        if rc is not None:
+            records[i] = score_record(r, rc)
+            n += 1
+    return records, n
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["record", "score", "stats", "calibrate"])
     ap.add_argument("--log", default=DEFAULT_LOG)
     ap.add_argument("--out", default=os.path.join(os.path.dirname(DEFAULT_LOG), "calibration.json"),
                     help="calibrate: where to write the coverage table")
+    ap.add_argument("--store", default=None,
+                    help="score: score against collect.py's persistent CSV store dir "
+                         "(per symbol/tf) instead of a live window on stdin")
+    ap.add_argument("--symbol", default=None,
+                    help="score: only score records for this symbol (guards the stdin "
+                         "path against cross-symbol mis-scoring)")
     args = ap.parse_args()
 
     if args.cmd == "calibrate":
@@ -309,20 +359,17 @@ def main():
         return
 
     if args.cmd == "score":
-        bars = _bars_from_stdin()
+        # Source: the persistent store (per-symbol, covers off-window forecasts)
+        # or a single live window on stdin (restricted to --symbol to avoid
+        # scoring one symbol's forecast against another's bars at the same time).
+        bars = None if args.store else _bars_from_stdin()
         with _lock(args.log):                 # read-modify-write must be atomic vs the hook
             records = read_log(args.log)
-            n_scored = 0
-            for i, r in enumerate(records):
-                if r.get("realized"):
-                    continue
-                tol = max(int(r.get("bar_step_sec") or 0) // 2, 1)
-                rc = nearest_close(bars, int(r["target_unix"]), tol)
-                if rc is not None:
-                    records[i] = score_record(r, rc)
-                    n_scored += 1
+            records, n_scored = score_pending(records, bars=bars,
+                                              store_dir=args.store, symbol=args.symbol)
             write_log(args.log, records)
-        print(f"scored {n_scored} newly-matured forecast(s) [{args.log}]")
+        src = f"store {args.store}" if args.store else "live window"
+        print(f"scored {n_scored} newly-matured forecast(s) from {src} [{args.log}]")
         return
 
     if args.cmd == "stats":
