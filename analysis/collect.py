@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""
+OHLCV collector — accumulate bars to disk beyond the ~300-bar live window.
+
+The live feed returns only ~300 bars per timeframe, which is too few for
+per-regime or per-condition statistics to reach n>=30 (see Block 7). This
+collector MERGES each pull into a persistent per-(symbol,timeframe) CSV store,
+de-duplicated by bar timestamp and kept sorted, so running it periodically
+grows real history. It can also RE-EMIT the store as the same bars JSON the
+analysis tools consume, so analyze/backtest/decide can run over the full
+accumulated history instead of the last 300 bars.
+
+Stdlib only (no numpy/pandas) so it runs unattended, e.g. from cron with the
+base Python.
+
+Usage:
+    # accumulate: pull the live window and merge into the store
+    node src/cli/index.js ohlcv --count 300 \
+      | python analysis/collect.py --symbol XAUUSD --tf 15
+
+    # inspect what has been accumulated
+    python analysis/collect.py --stats
+
+    # feed the FULL history into an analysis tool
+    python analysis/collect.py --symbol XAUUSD --tf 15 --emit \
+      | <venv>/python analysis/analyze.py --symbol XAUUSD --tf 15
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import sys
+
+FIELDS = ["time", "open", "high", "low", "close", "volume"]
+DEFAULT_STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+
+def _safe_name(symbol: str, tf: str) -> str:
+    s = symbol.replace(":", "_").replace("/", "_").replace("\\", "_")
+    return f"{s}_{tf}.csv"
+
+
+def store_path(store_dir: str, symbol: str, tf: str) -> str:
+    return os.path.join(store_dir, _safe_name(symbol, tf))
+
+
+def load_store(path: str) -> dict:
+    """Return {time(int): row(dict)} from an existing CSV store, or {}."""
+    rows = {}
+    if not os.path.exists(path):
+        return rows
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            t = int(float(r["time"]))
+            rows[t] = {k: (int(float(r[k])) if k == "time" else float(r[k]))
+                       for k in FIELDS}
+    return rows
+
+
+def valid_ohlc(b) -> bool:
+    """A bar is valid iff O/H/L/C are finite and positive and satisfy
+    high >= max(open, close, low) and low <= min(open, close, high). A malformed
+    feed bar (h<l, negatives, NaN/inf) would poison log(h/l) range estimators
+    (Parkinson, Garman-Klass) downstream, so reject it at ingestion."""
+    try:
+        o, h, l, c = float(b["open"]), float(b["high"]), float(b["low"]), float(b["close"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    for v in (o, h, l, c):
+        if v != v or v in (float("inf"), float("-inf")) or v <= 0:   # NaN / inf / non-positive
+            return False
+    return h >= max(o, c, l) and l <= min(o, c, h)
+
+
+def is_stale(b) -> bool:
+    """Stale / illiquid bar: no traded range (high<=low) or no volume. A feed
+    stall produces such bars, whose ~zero return deflates sigma and drags VR
+    toward mean-reversion. Dropped at ingestion (the resulting time gap is handled
+    by the gap-aware returns)."""
+    try:
+        h = float(b["high"]); l = float(b["low"])
+    except (KeyError, TypeError, ValueError):
+        return True
+    if h <= l:
+        return True
+    try:
+        return float(b.get("volume", 0)) <= 0
+    except (TypeError, ValueError):
+        return True
+
+
+def merge(existing: dict, new_bars: list) -> tuple:
+    """Merge new bars into the existing store (keyed by time). Returns
+    (sorted_rows, n_new, n_updated). A repeated timestamp UPDATES the bar (the
+    latest pull wins — the last live bar is often still forming)."""
+    n_new = n_upd = 0
+    for b in new_bars:
+        t = int(float(b["time"]))
+        row = {k: (t if k == "time" else float(b[k])) for k in FIELDS}
+        if t in existing:
+            if existing[t] != row:
+                n_upd += 1
+            existing[t] = row
+        else:
+            existing[t] = row
+            n_new += 1
+    ordered = [existing[t] for t in sorted(existing)]
+    return ordered, n_new, n_upd
+
+
+def save_store(path: str, rows: list) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+    os.replace(tmp, path)   # atomic — a crash never corrupts the store
+
+
+def read_bars_stdin() -> list:
+    payload = json.load(sys.stdin)
+    return payload.get("bars") or payload.get("ohlcv") or []
+
+
+def cmd_stats(store_dir: str) -> None:
+    if not os.path.isdir(store_dir):
+        print(f"(no store at {store_dir})")
+        return
+    files = sorted(f for f in os.listdir(store_dir) if f.endswith(".csv"))
+    if not files:
+        print(f"(store {store_dir} is empty)")
+        return
+    print(f"store: {store_dir}")
+    for f in files:
+        rows = load_store(os.path.join(store_dir, f))
+        times = sorted(rows)
+        span = f"{times[0]}..{times[-1]}" if times else "-"
+        n_gaps, step = _contiguity(times)
+        gap_note = f"   gaps={n_gaps} (step={step}s)" if step else ""
+        print(f"  {f:<28} {len(rows):>6} bars   time {span}{gap_note}")
+
+
+def _contiguity(times: list, gap_tol: float = 2.0) -> tuple:
+    """Count non-contiguous jumps (session/overnight gaps) in a sorted time list.
+    Returns (n_gaps, median_step_seconds). Cross-gap bars make one 'return' a
+    multi-period jump that poisons downstream sigma/GARCH/VR — see quant.log_returns."""
+    if len(times) < 3:
+        return 0, 0
+    deltas = [b - a for a, b in zip(times, times[1:]) if b > a]
+    if not deltas:
+        return 0, 0
+    step = sorted(deltas)[len(deltas) // 2]      # median
+    n_gaps = sum(1 for d in deltas if d > gap_tol * step)
+    return n_gaps, int(step)
+
+
+def cmd_emit(path: str) -> None:
+    rows = list(load_store(path).values())
+    rows.sort(key=lambda r: r["time"])
+    print(json.dumps({"success": True, "bar_count": len(rows),
+                      "total_available": len(rows), "source": "store",
+                      "bars": rows}))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--symbol", default="?")
+    ap.add_argument("--tf", default="15")
+    ap.add_argument("--store", default=DEFAULT_STORE, help="store directory")
+    ap.add_argument("--stats", action="store_true", help="list accumulated stores")
+    ap.add_argument("--emit", action="store_true",
+                    help="print the store as bars JSON (no stdin read)")
+    args = ap.parse_args()
+
+    if args.stats:
+        cmd_stats(args.store)
+        return
+
+    path = store_path(args.store, args.symbol, args.tf)
+    if args.emit:
+        cmd_emit(path)
+        return
+
+    new_bars = read_bars_stdin()
+    if not new_bars:
+        raise SystemExit("no bars on stdin to collect")
+    n_rej = sum(1 for b in new_bars if not valid_ohlc(b))
+    n_stale = sum(1 for b in new_bars if valid_ohlc(b) and is_stale(b))
+    clean = [b for b in new_bars if valid_ohlc(b) and not is_stale(b)]
+    existing = load_store(path)
+    before = len(existing)
+    ordered, n_new, n_upd = merge(existing, clean)
+    save_store(path, ordered)
+    notes = "".join([f", {n_rej} rejected (bad OHLC)" if n_rej else "",
+                     f", {n_stale} stale (no range/volume)" if n_stale else ""])
+    print(f"collected {args.symbol} {args.tf}m: +{n_new} new, {n_upd} updated{notes} "
+          f"-> {len(ordered)} total (was {before})  [{path}]")
+
+
+if __name__ == "__main__":
+    main()
