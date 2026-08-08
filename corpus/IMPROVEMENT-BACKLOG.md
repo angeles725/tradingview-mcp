@@ -293,6 +293,63 @@ Everything on the first two passes' "do not touch" lists; the segmented numerato
 denominator counterpart was missing (T1). The intraday gap heuristic itself is correct — T5 only bounded its
 SCOPE to intraday cadences.
 
+## Fourth-pass audit (2026-08-07, after the third-pass T1–T5)
+Two independent adversarial auditors re-read the full toolkit against this ledger, hunting only NEW defects the
+three prior passes missed. Both re-derived the decision-critical numerics rather than trusting the DONE rows.
+Verdict: the machinery is genuinely solid — most re-checked items (T1 within-session VR denominator, barrier
+first-passage MC, GARCH variance-targeting, BCa, PIT/pinball, leverage cap, walk-forward purge/embargo, `_ev_se`
+covariance) held up. **Two risk-understating bugs found, plus three hygiene/honesty items. All fixed, TDD.**
+
+### P1 — correctness bugs understating risk
+- ~~**F1**~~ **[CERT] DONE 2026-08-07** — `max_drawdown` (`quant.py:416`) seeded the running peak from `eq[0]`
+  (the FIRST trade's cumulative return), not from the starting equity. Any drawdown that begins before equity
+  first rises above initial capital was invisible: `r=[-0.10,-0.05,+0.20]` reported **4.9%** vs the true
+  **13.9%**, and `r=[-0.3]` reported **0.0%** on a trade that lost 26% — a wrong RISK number surfaced in the
+  backtest (`BTStats.max_drawdown`), understating the metric several-fold. The #13 test only exercised a
+  mid-series peak, so the from-start path was never tested. Fix: seed the equity path with the opening level
+  (`eq = concatenate(([0.0], cumsum(r)))`) so initial capital is the first high-water mark. Test extends
+  `test_max_drawdown_and_probabilistic_sharpe` (single-loss + from-start streak). Commit `5c3df59`. **S / HIGH**
+- ~~**F2**~~ **[CERT] DONE 2026-08-07** — Gate C set its TARGET from a gap-CLEAN cone (`mc_block` over
+  `log_returns(times=)`) but drew `p_target`/`p_stop` from `barrier_hit_probabilities`, which recomputed
+  close-to-close returns over **all** bars with no session-gap filter (`quant.py:383`, no `times` arg). On a
+  gap-prone trending instrument (SPX/index/stock/forex — the class T1/T5 flagged), overnight gaps aligned with
+  the trend inflated the retained drift (`mu=rc.mean()`) and dispersion → `p_target` overstated, `p_stop`
+  understated → EV and `_confidence` inflated in the risk-understating direction, with two DIFFERENT populations
+  driving one R:R/EV decision. Gold's near-24h session masked it (their test bed). Fix: add a `times/gap_tol`
+  path to `barrier_hit_probabilities` (shared `_gap_keep_mask` helper) that drops cross-session bars from the
+  resample pool BEFORE the drift is measured, and pass `times` from Gate C; behaviour unchanged when `times`
+  is None. Test `test_barrier_probabilities_drop_session_gaps` (altering an excluded gap bar must not move the
+  probabilities under `times`; the gap-blind pool is contaminated by the same jump). **Completes the T1/T5
+  gap-awareness sweep on the last decision-critical function it never reached.** Commit `68d9471`. **S / HIGH**
+
+### P3 — hygiene & honesty
+- ~~**F3**~~ **[CERT] DONE 2026-08-07** — the two degenerate early returns of `barrier_hit_probabilities`
+  (`c.size<2 or horizon<1`, and `m==0`) omitted the `"n"` key that the happy path (S16) added, so downstream
+  `_ev_se`/Gate C reading `bp["n"]` would `KeyError` on a 1-bar / `horizon<1` call instead of degrading. Latent
+  (unreachable with 300-bar production arrays). Fix: add `"n": 0` to both. Commit `5c3df59` (bundled with F1).
+  **S / low**
+- ~~**F4**~~ **[CERT] DONE 2026-08-07** — `simulate_process` and `_edge_precondition` hardcoded `cost_bps=1.0`,
+  so a non-default `Config.cost_bps` (e.g. gold-realistic 3.0) was honored by the live `decide` path (`bt.simulate(
+  …, cfg.cost_bps, …)`) but SILENTLY IGNORED by the walk-forward feedback — the historical edge/expectancy were
+  computed at the wrong cost. Not CLI-reachable (the CLI always builds `Config` with the 1.0 default), hence low.
+  Fix: default `cost_bps=None` and resolve to `cfg.cost_bps` unless explicitly overridden. Test
+  `test_simulate_process_honors_config_cost_bps` (two configs must diverge; higher cost never improves
+  expectancy). Commit `1247c3a`. **S / low**
+- ~~**F5**~~ **[CERT] DONE 2026-08-07** — the CLI `risk_cash` line read `risk $X at <price>`, which could be
+  misread as a guaranteed worst-case loss even though the engine models slippage + gap-through fills everywhere
+  else (S3). Relabeled to state it is the risk **at the stop level, excluding slippage/gap-through** — an
+  honesty label, no behavioural change (widening the sizing denominator would be a deliberate quant change, out
+  of scope for an audit). Commit `1247c3a`. **cosmetic / low**
+
+### Still solid (do NOT touch)
+Everything on the first three passes' "do not touch" lists, re-verified against source this pass: barrier
+intrabar first-passage + both-barriers→stop conservatism, GARCH one-step reconstruction, BCa z0/acceleration,
+`_independent_subset`/Wilson, backfill no-lookahead, `_ev_se` multinomial covariance sign, long/short stop &
+target directions, walk-forward purge/embargo boundary, T1–T5. The displayed Gaussian forecast cone uses √h (not
+VR-scaled) — this is intentional: the cone is calibration/display only, Gate C's decision uses the momentum-aware
+`mc_block` + barriers, and the under-coverage was investigated exhaustively (no static fix; realized-coverage
+reporting instead). No action.
+
 ## Suggested sequencing
 Quick wins first (all S-effort, each removes a real bias): **#6, #2, #4, #12, #15**. Then validity of the
 whole pipeline: **#1, #3, #5**. Then P2 method upgrades. Every fix lands with a test (strict TDD).
