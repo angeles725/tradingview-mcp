@@ -378,7 +378,7 @@ def barrier_hit_probabilities(entry: float, o: np.ndarray, h: np.ndarray,
     """
     c = np.asarray(c, dtype=float)
     if c.size < 2 or horizon < 1:
-        return {"p_target": float("nan"), "p_stop": float("nan"), "p_neither": float("nan")}
+        return {"p_target": float("nan"), "p_stop": float("nan"), "p_neither": float("nan"), "n": 0}
     prev = c[:-1]
     rc = np.log(c[1:] / prev)                         # close-to-close return
     hi = np.log(np.asarray(h, float)[1:] / prev)      # high excursion vs prev close
@@ -388,7 +388,7 @@ def barrier_hit_probabilities(entry: float, o: np.ndarray, h: np.ndarray,
         rc, hi, lo = rc - mu, hi - mu, lo - mu        # shift the whole bar by its drift
     m = rc.size
     if m == 0:
-        return {"p_target": float("nan"), "p_stop": float("nan"), "p_neither": float("nan")}
+        return {"p_target": float("nan"), "p_stop": float("nan"), "p_neither": float("nan"), "n": 0}
     rng = np.random.default_rng(seed)
     idx = stationary_bootstrap_indices(m, horizon, expected_block, n, rng)
     close_end = np.cumsum(rc[idx], axis=1)            # close level at END of each bar
@@ -420,7 +420,9 @@ def max_drawdown(returns: np.ndarray) -> float:
     r = np.asarray(returns, dtype=float)
     if r.size == 0:
         return 0.0
-    eq = np.cumsum(r)                       # cumulative log return
+    # Seed the path with the opening level (log-equity 0) so the initial capital
+    # is the first high-water mark: a losing first trade is a real drawdown, not 0.
+    eq = np.concatenate(([0.0], np.cumsum(r)))   # cumulative log return from start
     peak = np.maximum.accumulate(eq)
     dd = 1.0 - np.exp(eq - peak)            # fractional drawdown at each step
     return float(np.max(dd)) if dd.size else 0.0

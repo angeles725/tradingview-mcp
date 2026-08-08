@@ -281,6 +281,14 @@ def test_max_drawdown_and_probabilistic_sharpe():
             f"max_drawdown wrong: {q.max_drawdown(r)}")
     _assert(q.max_drawdown(np.array([0.01, 0.02, 0.03])) == 0.0,
             "a monotonically rising equity has zero drawdown")
+    # initial capital is the first high-water mark: a losing FIRST trade is a
+    # real drawdown from the start, not zero (regression for the from-start bug).
+    _assert(abs(q.max_drawdown(np.array([-0.3])) - (1 - math.exp(-0.3))) < 1e-9,
+            f"a single losing trade must show its full drawdown: {q.max_drawdown(np.array([-0.3]))}")
+    # a losing streak before equity ever rises above start: trough at -0.15
+    dd_streak = q.max_drawdown(np.array([-0.10, -0.05, 0.20]))
+    _assert(abs(dd_streak - (1 - math.exp(-0.15))) < 1e-9,
+            f"from-start losing streak drawdown wrong: {dd_streak}")
     # PSR: a clear positive edge -> ~1; zero-mean noise -> ~0.5
     rng = np.random.default_rng(0)
     _assert(q.probabilistic_sharpe(rng.normal(0.02, 0.01, 200)) > 0.95,
