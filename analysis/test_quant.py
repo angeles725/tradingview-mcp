@@ -241,6 +241,38 @@ def test_barrier_hit_probabilities():
     _assert(near["p_target"] > far["p_target"], "nearer target should hit more often")
 
 
+def test_barrier_probabilities_drop_session_gaps():
+    # Gate C reads the target off a gap-CLEAN cone but the barrier probabilities
+    # must come from the SAME population — a cross-session gap return must not enter
+    # the resample pool (else overnight jumps inflate p_target / understate p_stop).
+    rng = np.random.default_rng(3)
+    n_bars = 200
+    c1 = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.004, n_bars)))
+    # 5-min bars with one overnight session gap between index 100 and 101.
+    step = 300.0
+    times = np.arange(n_bars, dtype=float) * step
+    times[101:] += 57600.0                     # 16h gap -> dt[100] >> gap_tol*step
+    # c2 differs ONLY in the excluded cross-session return: scale the post-gap block
+    # so rc[100] (the gap jump) changes but every within-session ratio is untouched.
+    c2 = c1.copy(); c2[101:] *= 1.5
+    o1, h1, l1 = c1.copy(), c1 * 1.001, c1 * 0.999
+    o2, h2, l2 = c2.copy(), c2 * 1.001, c2 * 0.999
+    entry, stop, target = 100.0, 98.0, 102.0
+    p1 = q.barrier_hit_probabilities(entry, o1, h1, l1, c1, 20, stop, target, 1,
+                                     drift_zero=False, times=times)
+    p2 = q.barrier_hit_probabilities(entry, o2, h2, l2, c2, 20, stop, target, 1,
+                                     drift_zero=False, times=times)
+    _assert(p1["p_target"] == p2["p_target"] and p1["p_stop"] == p2["p_stop"],
+            f"excluded gap bar must not move probabilities: {p1} vs {p2}")
+    # Without `times` the gap return pollutes the pool and the probabilities DO move.
+    d1 = q.barrier_hit_probabilities(entry, o1, h1, l1, c1, 20, stop, target, 1,
+                                     drift_zero=False)
+    d2 = q.barrier_hit_probabilities(entry, o2, h2, l2, c2, 20, stop, target, 1,
+                                     drift_zero=False)
+    _assert(abs(d1["p_target"] - d2["p_target"]) > 0.02,
+            f"gap-blind pool should be contaminated by the jump: {d1} vs {d2}")
+
+
 def test_barrier_uses_block_bootstrap():
     # The trade only exists because Gate A asserts VR>1 (momentum); barrier paths
     # must inherit that serial structure via the stationary block bootstrap, not

@@ -165,7 +165,7 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
     # First-passage EV under the same edge-aware distribution (drift_zero=False):
     # RR alone ignores that the stop may be touched FIRST more often than the target.
     bp = q.barrier_hit_probabilities(entry, o, h, l, c, cfg.horizon, stop, target,
-                                     direction, drift_zero=False)
+                                     direction, drift_zero=False, times=times)
     ev = bp["p_target"] * reward - bp["p_stop"] * risk
     # EV must clear zero by more than its MC sampling error, so the gate is not
     # decided by Monte-Carlo noise (single-seed p_target/p_stop carry error ~1/sqrt(n)).

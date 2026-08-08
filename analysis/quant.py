@@ -293,6 +293,22 @@ def bootstrap_mean_ci_block(x: np.ndarray, expected_block: float = 10.0,
 _INTRADAY_STEP_MAX = 86400.0            # seconds (1 day)
 
 
+def _gap_keep_mask(times, gap_tol: float = 2.0):
+    """Boolean mask over the per-bar RETURNS array (len = len(times)-1): True where the
+    return is WITHIN-SESSION. A return whose interval exceeds gap_tol x the median step
+    is a session/overnight jump and is dropped. On a daily+ cadence there are no intraday
+    gaps, so all returns are kept. Mirrors the log_returns gap filter so the barrier
+    resample pool matches the gap-clean cone."""
+    dt = np.diff(np.asarray(times, dtype=float))
+    pos = dt[dt > 0]
+    if pos.size == 0:
+        return np.ones(dt.size, dtype=bool)
+    step = float(np.median(pos))
+    if step >= _INTRADAY_STEP_MAX:      # daily+ cadence: no session-gap fragmentation
+        return np.ones(dt.size, dtype=bool)
+    return dt <= gap_tol * step
+
+
 def _return_segments(times, gap_tol: float = 2.0):
     """Index ranges (s,e) into the RETURNS array (len = len(times)-1) of consecutive
     WITHIN-SESSION returns. A return spanning a time gap (dt > gap_tol*median step)
@@ -366,7 +382,8 @@ def barrier_hit_probabilities(entry: float, o: np.ndarray, h: np.ndarray,
                               l: np.ndarray, c: np.ndarray, horizon: int,
                               stop: float, target: float, direction: int = 1,
                               drift_zero: bool = True, n: int = 20000,
-                              seed: int = 7, expected_block: float = 5.0) -> dict:
+                              seed: int = 7, expected_block: float = 5.0,
+                              times=None, gap_tol: float = 2.0) -> dict:
     """
     Monte-Carlo FIRST-PASSAGE probabilities with INTRABAR extremes: over `horizon`
     bars, which barrier (target or stop) is touched FIRST. Resamples historical
@@ -383,6 +400,12 @@ def barrier_hit_probabilities(entry: float, o: np.ndarray, h: np.ndarray,
     rc = np.log(c[1:] / prev)                         # close-to-close return
     hi = np.log(np.asarray(h, float)[1:] / prev)      # high excursion vs prev close
     lo = np.log(np.asarray(l, float)[1:] / prev)      # low excursion vs prev close
+    if times is not None:
+        # Drop cross-session bars from the resample pool BEFORE the drift is measured,
+        # so both the drift (mu) and the path dispersion match the gap-clean cone that
+        # sets the target — otherwise overnight gaps inflate p_target / understate p_stop.
+        keep = _gap_keep_mask(times, gap_tol)
+        rc, hi, lo = rc[keep], hi[keep], lo[keep]
     if drift_zero:
         mu = rc.mean()
         rc, hi, lo = rc - mu, hi - mu, lo - mu        # shift the whole bar by its drift
