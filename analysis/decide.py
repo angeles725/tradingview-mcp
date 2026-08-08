@@ -197,12 +197,14 @@ def decide(o, h, l, c, cfg: Config, edge_override=None, times=None,
 # This is the "buena retroalimentación": how the WHOLE decision process behaves,
 # not any single indicator. Costs and next-open fills included; no lookahead.
 # --------------------------------------------------------------------------- #
-def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=1.0):
+def _edge_precondition(o, h, l, c, t, cfg: Config, cost_bps=None):
     """Validate the rule's edge on history STRICTLY BEFORE bar t (expanding
     window) — never on future bars. Returns (edge_ok, detail). Before there is
     enough history to close a trade, no edge is claimed and the process stays
     flat. This is the no-lookahead replacement for a single in-sample split.
     """
+    if cost_bps is None:                 # honor Config.cost_bps unless overridden
+        cost_bps = cfg.cost_bps
     # Direction must match the trend, so a SELL setup is validated on the SHORT
     # rule (c<ema, short P&L) — not a counter-trend long edge (backlog #6).
     direction = 1 if q.ols_trend(c[:t], cfg.r2_floor).slope > 0 else -1
@@ -272,7 +274,9 @@ def _resolve_exit(o, h, l, entry_i, horizon, direction, stop, target, n, slip=0.
     return float(o[min(entry_i + horizon, n - 1)]), "timeout"
 
 
-def simulate_process(o, h, l, c, cfg: Config, cost_bps=1.0, refit=None, times=None):
+def simulate_process(o, h, l, c, cfg: Config, cost_bps=None, refit=None, times=None):
+    if cost_bps is None:                 # honor Config.cost_bps unless overridden
+        cost_bps = cfg.cost_bps
     n = c.size
     warmup = max(cfg.ema_period, 30) + cfg.horizon
     # Expanding-window edge precondition, recomputed only from bars[:t] (never the
@@ -380,7 +384,8 @@ def _print_stance(args, st, last):
     if st.action != "NO-TRADE":
         print(f"\n  entry {st.entry:.2f}  stop {st.stop:.2f}  target {st.target:.2f}  "
               f"R:R {st.rr:.2f}")
-        print(f"  size {st.size_units:.4f} units  (risk ${st.risk_cash:.2f} at {last:.2f})")
+        print(f"  size {st.size_units:.4f} units  "
+              f"(risk ${st.risk_cash:.2f} at the stop — excl. slippage/gap-through)")
     else:
         print("\n  Flat is a position. No setup meets the bar; the honest move is to wait.")
     print("=" * W)

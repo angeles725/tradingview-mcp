@@ -229,6 +229,21 @@ def test_simulate_process_runs_without_lookahead():
             f"unexpected verdict {out['verdict']}")
 
 
+def test_simulate_process_honors_config_cost_bps():
+    # cfg.cost_bps must flow into the walk-forward feedback (edge precondition AND
+    # trade P&L). Previously simulate_process hardcoded cost_bps=1.0, so a non-default
+    # Config.cost_bps was silently ignored — the live decide path used it but the
+    # feedback did not. Two very different configs must produce different output.
+    o, h, l, c = _trending_series(220, seed=2)
+    out_lo = d.simulate_process(o, h, l, c, Config(cost_bps=1.0))
+    out_hi = d.simulate_process(o, h, l, c, Config(cost_bps=200.0))
+    _assert(out_lo != out_hi, "cfg.cost_bps must change the feedback output")
+    # higher cost can never IMPROVE the historical expectancy when trades occur
+    if out_lo["trades"] > 0 and out_hi["trades"] == out_lo["trades"]:
+        _assert(out_hi["expectancy_bps"] < out_lo["expectancy_bps"],
+                f"higher cost must lower expectancy: {out_hi['expectancy_bps']} vs {out_lo['expectancy_bps']}")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
