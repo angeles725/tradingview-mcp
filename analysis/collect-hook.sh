@@ -22,10 +22,10 @@ set -uo pipefail
 # so it is not tied to a hardcoded path.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Symbols to accumulate each tick. DEFAULT is one (gold) — behaviour unchanged.
-# Add more to build calibration across instruments; with >1 symbol the detached
-# job briefly cycles the live chart and restores the FIRST (primary) at the end.
-SYMBOLS=("OANDA:XAUUSD")
+# Symbols to accumulate each tick. With >1 symbol the detached job briefly cycles
+# the live chart and restores the FIRST (primary, gold) at the end. Scoring is
+# symbol-correct (score --store), so a multi-symbol log never cross-scores.
+SYMBOLS=("OANDA:XAUUSD" "OANDA:EURUSD" "OANDA:SPX500USD" "OANDA:USDJPY" "OANDA:GBPUSD" "OANDA:AUDUSD")
 TF="15"
 THROTTLE_MIN=30
 HORIZON=4          # forecast horizon in bars (4 x 15m = next hour)
