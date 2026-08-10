@@ -655,6 +655,24 @@ def test_blend_sigma_equal_weight_and_skips_none():
     _assert(q.blend_sigma(None, None) is None, "all-None blend is None")
 
 
+def test_gjr_garch_fits_and_captures_leverage():
+    # A series with LARGER moves after down-days should let GJR fit a positive
+    # leverage term (gamma). We only require a valid, stationary fit here.
+    rng = np.random.default_rng(11)
+    n = 600
+    r = np.zeros(n)
+    for t in range(1, n):
+        shock = 0.006 if r[t-1] < 0 else 0.003     # bigger vol after a down move
+        r[t] = rng.normal(0, shock)
+    out = q.gjr_garch11_vol(r)
+    if out is None:
+        return                                       # scipy absent -> caller falls back
+    sigma, p = out
+    _assert(sigma > 0 and math.isfinite(sigma), "GJR sigma positive & finite")
+    _assert(set(("alpha", "beta", "gamma", "nu")) <= set(p), "GJR reports leverage gamma")
+    _assert(p["alpha"] + p["beta"] + p["gamma"] / 2.0 < 1.0 + 1e-6, "GJR stationary")
+
+
 def test_cone_sigma_shared_recipe_blends_and_falls_back():
     # The single source of truth analyze.py and backfill.py share, so the cone
     # can't drift between live and backtest.

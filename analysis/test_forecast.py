@@ -249,6 +249,43 @@ def _scored(P5, P95, realized, S0=100.0, P25=None, P75=None, model="gaussian", m
     }
 
 
+def test_dedupe_prefers_scored_over_unscored():
+    # Same forecast key recorded twice: once SCORED, once not. Dedupe must keep the
+    # scored copy regardless of order (else calibration silently loses outcomes).
+    base = dict(symbol="X", tf="15", made_at_unix=10, horizon_bars=4)
+    scored = {**base, "realized": {"close": 1.0}}
+    unscored = {**base, "realized": None}
+    for order in ([scored, unscored], [unscored, scored]):
+        out = fc._dedupe(order)
+        _assert(len(out) == 1, "one record per key")
+        _assert(out[0]["realized"] is not None, "the scored copy must survive dedupe")
+
+
+def test_crps_from_quantiles_properties():
+    lv = fc.QUANTILE_LEVELS
+    narrow = [98.0, 99.0, 100.0, 101.0, 102.0]
+    wide = [90.0, 95.0, 100.0, 105.0, 110.0]
+    # non-negative, and symmetric around the median for a symmetric cone
+    _assert(fc.crps_from_quantiles(lv, narrow, 100.0) >= 0, "CRPS non-negative")
+    a = fc.crps_from_quantiles(lv, narrow, 100.0 + 1.5)
+    b = fc.crps_from_quantiles(lv, narrow, 100.0 - 1.5)
+    _assert(abs(a - b) < 1e-9, "CRPS symmetric for a symmetric cone")
+    # sharpness: at the median, a narrower cone scores BETTER (lower) than a wide one
+    _assert(fc.crps_from_quantiles(lv, narrow, 100.0) < fc.crps_from_quantiles(lv, wide, 100.0),
+            "a sharper cone must have lower CRPS when the realized is at the median")
+    # a realized far in the tail costs more than one at the median
+    _assert(fc.crps_from_quantiles(lv, narrow, 100.0) < fc.crps_from_quantiles(lv, narrow, 110.0),
+            "a tail outcome must cost more than a central one")
+
+
+def test_score_record_reports_crps():
+    rec = fc.build_record(_report())
+    s = fc.score_record(rec, 103.0)
+    g = s["realized"]["models"]["gaussian"]
+    _assert("crps" in g and g["crps"] >= 0, "score_record attaches a CRPS per model")
+    _assert("crps_bps" in g and g["crps_bps"] >= 0, "CRPS also normalized to bps of S0")
+
+
 def test_conformal_delta_split_quantile():
     scores = [0.1, 0.2, 0.3, 0.4, 0.5]
     # level 0.5 -> idx = ceil(6*0.5)=3 -> 3rd smallest = 0.3

@@ -706,6 +706,68 @@ def garch11_vol(returns: np.ndarray):
                                    "beta": float(beta), "nu": float(nu)}
 
 
+def gjr_garch11_vol(returns: np.ndarray):
+    """GJR-GARCH(1,1) with Student-t innovations — a GARCH variant that adds a
+    LEVERAGE term: negative returns raise next-bar variance more than positive ones
+    (sigma2_t = omega + (alpha + gamma*1[r<0])*r^2 + beta*sigma2). Real equity/index
+    vol is asymmetric, so this is the honest refinement of the symmetric GARCH.
+    Variance targeting (kappa=0.5) drops omega; multi-start for robustness. Returns
+    (sigma, params) with a `gamma` leverage term, or None if scipy is absent / fit
+    fails (callers fall back to the symmetric GARCH or EWMA)."""
+    if not _HAS_SCIPY:
+        return None
+    r = np.asarray(returns, dtype=float)
+    r = r - r.mean()
+    var0 = float(np.var(r))
+    if var0 <= 0 or r.size < 20:
+        return None
+    neg = (r < 0).astype(float)
+
+    def sigma2_path(alpha, beta, gamma):
+        omega = var0 * (1.0 - alpha - beta - 0.5 * gamma)     # variance targeting, kappa=0.5
+        s2 = np.empty_like(r)
+        s2[0] = var0
+        for t in range(1, r.size):
+            s2[t] = omega + (alpha + gamma * neg[t - 1]) * r[t - 1] ** 2 + beta * s2[t - 1]
+        return s2, omega
+
+    def nll_t(theta):
+        alpha, beta, gamma, nu = theta
+        if (alpha < 0 or beta < 0 or gamma < 0 or nu <= 2.05 or nu > 200
+                or alpha + beta + 0.5 * gamma >= 0.999):
+            return 1e12
+        s2, _ = sigma2_path(alpha, beta, gamma)
+        if np.any(s2 <= 0) or not np.all(np.isfinite(s2)):
+            return 1e12
+        c = math.lgamma((nu + 1) / 2) - math.lgamma(nu / 2) - 0.5 * math.log(math.pi * (nu - 2))
+        ll = c - 0.5 * np.log(s2) - ((nu + 1) / 2) * np.log(1.0 + r ** 2 / ((nu - 2) * s2))
+        return -float(np.sum(ll))
+
+    best = None
+    for x0 in ((0.03, 0.90, 0.04, 8.0), (0.05, 0.85, 0.10, 5.0), (0.02, 0.93, 0.03, 12.0)):
+        try:
+            res = optimize.minimize(nll_t, np.array(x0), method="Nelder-Mead",
+                                    options={"maxiter": 5000, "xatol": 1e-8, "fatol": 1e-8})
+        except Exception:
+            continue
+        if np.isfinite(res.fun) and (best is None or res.fun < best.fun):
+            best = res
+    if best is None:
+        return None
+    alpha, beta, gamma, nu = best.x
+    if alpha < 0 or beta < 0 or gamma < 0 or alpha + beta + 0.5 * gamma >= 1 or nu <= 2:
+        return None
+    omega = var0 * (1.0 - alpha - beta - 0.5 * gamma)
+    sigma2 = var0
+    for t in range(1, r.size):
+        sigma2 = omega + (alpha + gamma * neg[t - 1]) * r[t - 1] ** 2 + beta * sigma2
+    sigma_next = omega + (alpha + gamma * neg[-1]) * r[-1] ** 2 + beta * sigma2
+    if sigma_next <= 0 or not np.isfinite(sigma_next):
+        return None
+    return math.sqrt(sigma_next), {"omega": float(omega), "alpha": float(alpha),
+                                   "beta": float(beta), "gamma": float(gamma), "nu": float(nu)}
+
+
 def scale_sigma(sigma_bar: float, horizon: int, vr: float = 1.0) -> float:
     """Scale per-bar sigma to an N-bar horizon, honoring the variance ratio.
 

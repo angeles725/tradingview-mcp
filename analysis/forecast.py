@@ -117,6 +117,23 @@ def pinball_loss(levels, values, y: float) -> float:
     return tot / len(levels)
 
 
+def crps_from_quantiles(levels, values, y: float) -> float:
+    """CRPS approximated from the stored quantile forecast. CRPS = 2 * integral of
+    the quantile (pinball) loss over tau in (0,1); this trapezoid-integrates the
+    per-level pinball across the stored levels (tails beyond the outer quantiles
+    truncated). One number for FULL-distribution calibration — complements pinball
+    at fixed levels, and weights by the tau-spacing the flat mean ignores. Lower is
+    better; comparable across models."""
+    pl = []
+    for tau, q in zip(levels, values):
+        d = y - q
+        pl.append(tau * d if d >= 0 else (tau - 1.0) * d)
+    integral = 0.0
+    for i in range(1, len(levels)):
+        integral += (levels[i] - levels[i - 1]) * (pl[i] + pl[i - 1]) / 2.0
+    return 2.0 * integral
+
+
 def _dir_hit(realized_close: float, S0: float, p_up: float):
     """Directional hit, or None when the cone makes no real directional call.
     Zero-drift cones sit at p_up ~ 0.5, so scoring direction there just recovers
@@ -144,6 +161,9 @@ def score_record(rec: dict, realized_close: float) -> dict:
             # normalized to bps of S0 so pinball is comparable across symbols/prices
             "pinball_bps": (pinball_loss(QUANTILE_LEVELS, qv, realized_close) / S0 * 1e4)
                            if S0 else float("nan"),
+            "crps": crps_from_quantiles(QUANTILE_LEVELS, qv, realized_close),
+            "crps_bps": (crps_from_quantiles(QUANTILE_LEVELS, qv, realized_close) / S0 * 1e4)
+                        if S0 else float("nan"),
         }
     out = dict(rec)
     out["realized"] = realized
@@ -151,12 +171,16 @@ def score_record(rec: dict, realized_close: float) -> dict:
 
 
 def _dedupe(records: list) -> list:
-    """Collapse exact duplicate forecasts (same symbol/tf/made_at/horizon); last wins.
-    The hook can record the same window twice, which would double-count coverage."""
+    """Collapse exact duplicate forecasts (same symbol/tf/made_at/horizon). The hook
+    can record the same window twice, which would double-count coverage. A SCORED
+    copy always beats an unscored one (else calibration silently drops the realized
+    outcome); among copies of equal scored-status, last wins."""
     seen = {}
     for r in records:
         key = (r.get("symbol"), r.get("tf"), r.get("made_at_unix"), r.get("horizon_bars"))
-        seen[key] = r
+        prev = seen.get(key)
+        if prev is None or r.get("realized") is not None or prev.get("realized") is None:
+            seen[key] = r
     return list(seen.values())
 
 
@@ -220,6 +244,10 @@ def calibration(records: list) -> dict:
                and "pinball_bps" in x]
         if pbb:                               # bps-normalized -> comparable across symbols
             stat["mean_pinball_bps"] = sum(pbb) / len(pbb)
+        crb = [x["crps_bps"] for x in rows if x.get("crps_bps") == x.get("crps_bps")
+               and "crps_bps" in x]
+        if crb:                               # full-distribution score, bps-normalized
+            stat["mean_crps_bps"] = sum(crb) / len(crb)
         out["models"][m] = stat
     return out
 
@@ -518,14 +546,15 @@ def main():
         print(f"forecasts: {cal['n_scored']}/{cal['n_total']} scored  "
               f"(n_eff={cal['n_eff']} non-overlapping)  [{args.log}]")
         print(f"  {'model':<14}{'n':>5}{'cover90':>9}{'cover50':>9}{'pinball_bps':>12}"
-              f"{'cover90 CI':>16}{'dir_acc':>12}")
+              f"{'crps_bps':>10}{'cover90 CI':>16}{'dir_acc':>12}")
         for m, s in cal["models"].items():
             dir_s = f"{s['dir_acc']:.2f} (n={s['dir_n']})" if "dir_acc" in s else "n/a"
             pb_s = f"{s['mean_pinball_bps']:.1f}" if "mean_pinball_bps" in s else "n/a"
+            cr_s = f"{s['mean_crps_bps']:.1f}" if "mean_crps_bps" in s else "n/a"
             ci = s.get("cover_90_ci")
             ci_s = f"[{ci[0]:.2f},{ci[1]:.2f}]" if ci else "n/a"
             print(f"  {m:<14}{s['n']:>5}{s['cover_90']:>9.2f}{s['cover_50']:>9.2f}"
-                  f"{pb_s:>12}{ci_s:>16}{dir_s:>12}")
+                  f"{pb_s:>12}{cr_s:>10}{ci_s:>16}{dir_s:>12}")
         print("  -> cover90 CI uses n_eff (independent forecasts); wide until n_eff grows.")
         print("  -> lower pinball_bps = better-shaped cone, comparable across symbols/horizons.")
         print("  -> cover90 should trend to ~0.90 and cover50 to ~0.50 if the cone")
