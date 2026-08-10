@@ -43,6 +43,7 @@ deduction.
 | 16 | Capability boundary: analysis works, execution and order-flow do not | [tvdecision-block16.md](tvdecision-block16.md) | replay forecast+decide loop works (NO-TRADE, correct), replay trade returns success but registers no position, data depth unavailable for CFDs, stream works but non-additive; toolkit is analyst not trader |
 | 17 | Periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation | [tvdecision-block17.md](tvdecision-block17.md) | trade_levels SL/TP from cone P5/P95, monthly(h22)+weekly-Monday(h5) forecasts, weekly review, HTML report, calendar-gated hook; multi-TF RSI/EMA500/S-R drawn |
 | 18 | Confluence: Fibonacci + accumulation + candles + bull/base/bear panoramas | [tvdecision-block18.md](tvdecision-block18.md) | fib_levels (up/down), obv + volume-profile POC (accumulation), 20-candle balance, scenarios; gold fib 0.618=4145 confirms weekly SL 4143 |
+| 19 | Actionable layer: risk-based position sizer + confluence price alerts | [tvdecision-block19.md](tvdecision-block19.md) | size_for_risk (units from stop-distance, notional/leverage/RR), live alerts at SL/Fib/TP/POC; action not prediction, direction still ~0.50 |
 
 ## Companion deliverable
 
@@ -70,8 +71,9 @@ deduction.
 - [x] Capability boundary: analysis works, execution and order-flow do not -> [Block 16]
 - [x] Periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation -> [Block 17]
 - [x] Confluence: Fibonacci + accumulation + candles + bull/base/bear panoramas -> [Block 18]
+- [x] Actionable layer: risk-based position sizer + confluence price alerts -> [Block 19]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 18 / 18 items captured
+- **Document outline (tvdecision focus)**: 19 / 19 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)
