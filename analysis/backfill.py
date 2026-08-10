@@ -31,10 +31,12 @@ DEFAULT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 _QK = ("P5", "P25", "P50", "P75", "P95", "p_up", "model")
 
 
-def _cones(S0, ret, horizon, seed=7):
-    """The zero-drift forecast cones, exactly as analyze.py builds them."""
+def _cones(o, h, l, c, ret, S0, horizon, seed=7):
+    """The zero-drift forecast cones, exactly as analyze.py builds them — via the
+    SHARED quant.cone_sigma recipe (GARCH + HAR-RV blend over Rogers-Satchell,
+    EWMA fallback), so the backtest cone matches the live cone."""
     vg = q.garch11_vol(ret)
-    sigma = vg[0] if vg else q.ewma_vol(ret)
+    sigma, _ = q.cone_sigma(vg[0] if vg else None, o, h, l, c, ret)
     return {
         "gaussian": q.mc_gaussian(S0, sigma, horizon, 0.0, seed=seed),
         "bootstrap": q.mc_bootstrap(S0, ret, horizon, seed=seed),
@@ -50,6 +52,9 @@ def backfill_bars(bars: list, symbol: str, tf: str, horizon: int,
     if len(bars) < warmup + horizon + 1:
         return 0
     c = np.array([b["close"] for b in bars], float)
+    o = np.array([b.get("open", b["close"]) for b in bars], float)
+    hi = np.array([b.get("high", b["close"]) for b in bars], float)
+    lo = np.array([b.get("low", b["close"]) for b in bars], float)
     t_ = np.array([b.get("time", i) for i, b in enumerate(bars)], float)
     n, h = c.size, horizon
     dt = np.diff(t_); step_sec = int(np.median(dt[dt > 0])) if np.any(dt > 0) else 0
@@ -60,7 +65,7 @@ def backfill_bars(bars: list, symbol: str, tf: str, horizon: int,
         if ret.size < 30:
             continue
         S0 = float(c[t])
-        cn = _cones(S0, ret, h)
+        cn = _cones(o[:t + 1], hi[:t + 1], lo[:t + 1], cs, ret, S0, h)
         rec = {
             "symbol": symbol, "tf": tf, "horizon_bars": h,
             "bar_step_sec": step_sec, "made_at_unix": int(t_[t]),

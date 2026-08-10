@@ -53,6 +53,12 @@ LOG="$DATA/collect.log"
 # analyze consumes it to WIDEN recorded cones toward nominal coverage once enough
 # matured forecasts exist; until then it is empty and analyze is unaffected.
 CONF="$PROJECT/corpus/conformal.json"
+# Backfill seed log: non-overlapping historical forecasts from the store, pooled
+# with the live log so the conformal table reaches min_n far sooner. Regenerated
+# at most every BACKFILL_MAX_AGE seconds (it is deterministic from the store and
+# GARCH-heavy, so it is not rebuilt every tick).
+BACKFILL="$PROJECT/corpus/forecasts-backfill.jsonl"
+BACKFILL_MAX_AGE=43200      # 12h
 
 mkdir -p "$DATA"
 
@@ -94,10 +100,17 @@ nohup bash -c "
   # matched against ITS OWN symbol/tf store, so a multi-symbol log never scores
   # one symbol against another's bars, and off-live-window forecasts still score.
   '$PY' analysis/forecast.py score --store '$DATA' >>'$LOG' 2>&1
-  # (d) refresh the conformal correction table from all matured forecasts, so the
-  # NEXT tick's cones are widened toward nominal coverage. A no-op until a group
-  # reaches min_n scored records.
-  '$PY' analysis/forecast.py conformal --conformal-out '$CONF' >>'$LOG' 2>&1
+  # (d) refresh the backfill seed if missing/stale (deterministic from the store,
+  # GARCH-heavy -> rate-limited), then refresh the conformal correction table from
+  # the live log POOLED with the backfill seed, so the NEXT tick's cones are
+  # widened toward nominal coverage without waiting weeks for live maturations.
+  bfage=999999999
+  [ -f '$BACKFILL' ] && bfage=\$(( \$(date +%s) - \$(stat -c %Y '$BACKFILL' 2>/dev/null || echo 0) ))
+  if [ \$bfage -gt $BACKFILL_MAX_AGE ]; then
+    bfsyms=\$(IFS=,; echo \"\${syms[*]}\")
+    '$PY' analysis/backfill.py --store '$DATA' --symbols \"\$bfsyms\" --tf '$TF' --horizon '$HORIZON' --warmup 60 --reset >>'$LOG' 2>&1
+  fi
+  '$PY' analysis/forecast.py conformal --conformal-out '$CONF' --extra-log '$BACKFILL' >>'$LOG' 2>&1
   # restore the primary chart if we cycled symbols
   [ \$multi -eq 1 ] && '$NODE' src/cli/index.js symbol \"\$primary\" >>'$LOG' 2>&1
   echo \"[\$(date '+%F %T')] collect+forecast tick done (\${#syms[@]} sym)\" >>'$LOG'

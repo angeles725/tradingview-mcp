@@ -120,18 +120,12 @@ def main():
     v_yz = q.yang_zhang_vol(o, h, l, c)
     garch = q.garch11_vol(ret)
     v_garch = garch[0] if garch else None
-    # HAR-RV over a per-bar Rogers-Satchell realized-variance series: the best-
-    # documented out-of-sample vol forecaster, and gap-robust (each RS term is an
-    # intraday range, so overnight jumps never contaminate it).
-    rs_var = q.rogers_satchell_var(o, h, l, c)
-    har_var = q.har_rv_forecast(rs_var)
-    v_har = har_var ** 0.5 if har_var and har_var > 0 else None
 
-    # Cone sigma blends the two conditional estimators the evidence favours —
-    # the GARCH(1,1) clustering-aware sigma and the HAR-RV forecast (50/50). Falls
-    # back to whichever is available, then to EWMA. This is the "volatility of NOW".
-    blended = q.blend_sigma(v_garch, v_har)
-    sigma_cone = blended if blended else v_ewma
+    # Cone sigma via the SHARED recipe (quant.cone_sigma): blends the GARCH(1,1)
+    # clustering-aware sigma with a HAR-RV forecast over a gap-robust Rogers-Satchell
+    # realized-variance series (50/50), falling back to EWMA. Shared with backfill.py
+    # so the live cone and the backtest cone can never drift apart.
+    sigma_cone, v_har = q.cone_sigma(v_garch, o, h, l, c, ret)
     daily_pct = q.scale_sigma(sigma_cone, bars_per_day) * 100
 
     # --- RSI -------------------------------------------------------------

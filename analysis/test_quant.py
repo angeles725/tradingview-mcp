@@ -655,6 +655,23 @@ def test_blend_sigma_equal_weight_and_skips_none():
     _assert(q.blend_sigma(None, None) is None, "all-None blend is None")
 
 
+def test_cone_sigma_shared_recipe_blends_and_falls_back():
+    # The single source of truth analyze.py and backfill.py share, so the cone
+    # can't drift between live and backtest.
+    rng = np.random.default_rng(3)
+    c = 100.0 * np.exp(np.cumsum(rng.normal(0, 0.004, 200)))
+    o, h, l = c.copy(), c * 1.002, c * 0.998
+    ret = q.log_returns(c)
+    sig, v_har = q.cone_sigma(0.02, o, h, l, c, ret)
+    _assert(v_har is not None and v_har > 0, "har sigma computed from OHLC")
+    _assert(abs(sig - (0.02 + v_har) / 2) < 1e-12, "sigma is the 50/50 garch+har blend")
+    # No GARCH and a flat OHLC (HAR undefined) -> falls back to EWMA of returns.
+    flat = np.full(c.size, 100.0)
+    sig2, v_har2 = q.cone_sigma(None, flat, flat, flat, flat, ret)
+    _assert(v_har2 is None, "flat OHLC yields no HAR sigma")
+    _assert(abs(sig2 - q.ewma_vol(ret)) < 1e-12, "fallback is EWMA when garch+har absent")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

@@ -449,6 +449,9 @@ def main():
                     help="conformal: where to write the per-band correction table")
     ap.add_argument("--min-n", type=int, default=20,
                     help="conformal: minimum scored records per group to emit a correction")
+    ap.add_argument("--extra-log", action="append", default=None,
+                    help="conformal: additional log(s) to POOL with --log before computing "
+                         "corrections (e.g. a backfill log, to reach min_n sooner). Repeatable.")
     ap.add_argument("--store", default=None,
                     help="score: score against collect.py's persistent CSV store dir "
                          "(per symbol/tf) instead of a live window on stdin")
@@ -466,7 +469,10 @@ def main():
         return
 
     if args.cmd == "conformal":
-        rep = conformal_report(read_log(args.log), min_n=args.min_n)
+        recs = read_log(args.log)
+        for extra in (args.extra_log or []):        # pool a backfill log to reach min_n
+            recs += read_log(extra)
+        rep = conformal_report(recs, min_n=args.min_n)
         out_path = args.conformal_out
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
         with open(out_path, "w") as f:

@@ -768,6 +768,19 @@ def blend_sigma(*sigmas, weights=None) -> "float | None":
     return sum(v * w for v, w in zip(vals, wts)) / tot if tot > 0 else None
 
 
+def cone_sigma(v_garch, o, h, l, c, ret):
+    """The per-bar cone sigma recipe, in ONE place so analyze.py (live) and
+    backfill.py (backtest) can never drift: blend the GARCH conditional sigma with
+    a HAR-RV forecast over a Rogers-Satchell realized-variance series (50/50), and
+    fall back to EWMA of the returns when neither is available. Callers pass the
+    GARCH sigma they already fitted (it is expensive) so it is computed once.
+    Returns (sigma_cone, v_har)."""
+    hv = har_rv_forecast(rogers_satchell_var(o, h, l, c))
+    v_har = hv ** 0.5 if hv and hv > 0 else None
+    blended = blend_sigma(v_garch, v_har)
+    return (blended if blended is not None else ewma_vol(ret)), v_har
+
+
 # --------------------------------------------------------------------------- #
 # RSI — Wilder formulation (matches TradingView)
 # --------------------------------------------------------------------------- #
