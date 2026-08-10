@@ -655,6 +655,34 @@ def test_blend_sigma_equal_weight_and_skips_none():
     _assert(q.blend_sigma(None, None) is None, "all-None blend is None")
 
 
+def test_fib_levels_up_and_down():
+    up = q.fib_levels(100.0, 200.0, "up")     # uptrend retracement: supports below high
+    _assert(abs(up[0.0] - 200.0) < 1e-9 and abs(up[1.0] - 100.0) < 1e-9, "0%=high, 100%=low")
+    _assert(abs(up[0.5] - 150.0) < 1e-9, "50% = midpoint")
+    _assert(abs(up[0.618] - (200 - 0.618 * 100)) < 1e-9, "61.8% retrace measured down from high")
+    dn = q.fib_levels(100.0, 200.0, "down")   # downtrend retracement: resistances above low
+    _assert(abs(dn[0.0] - 100.0) < 1e-9 and abs(dn[1.0] - 200.0) < 1e-9, "0%=low, 100%=high")
+    _assert(abs(dn[0.618] - (100 + 0.618 * 100)) < 1e-9, "61.8% retrace measured up from low")
+
+
+def test_obv_accumulation_direction():
+    c = np.array([10.0, 11.0, 10.5, 12.0])
+    v = np.array([100.0, 200.0, 150.0, 300.0])
+    o = q.obv(c, v)
+    _assert(o.shape == c.shape and o[0] == 0.0, "OBV starts at 0, one per bar")
+    # +200 (up), -150 (down), +300 (up) = 350
+    _assert(abs(o[-1] - 350.0) < 1e-9, f"OBV cumulates signed volume, got {o[-1]}")
+
+
+def test_volume_profile_poc_finds_accumulation_zone():
+    # Volume concentrated near price 105 -> POC should land there.
+    highs = np.array([101, 106, 106, 101, 120], float)
+    lows = np.array([99, 104, 104, 99, 118], float)
+    vols = np.array([10, 500, 500, 10, 10], float)
+    poc = q.volume_profile_poc(highs, lows, vols, bins=30)
+    _assert(104 <= poc <= 106, f"POC should sit in the high-volume zone ~105, got {poc}")
+
+
 def test_gjr_garch_fits_and_captures_leverage():
     # A series with LARGER moves after down-days should let GJR fit a positive
     # leverage term (gamma). We only require a valid, stationary fit here.

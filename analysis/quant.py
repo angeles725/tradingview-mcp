@@ -768,6 +768,66 @@ def gjr_garch11_vol(returns: np.ndarray):
                                    "beta": float(beta), "gamma": float(gamma), "nu": float(nu)}
 
 
+_FIB_RATIOS = (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+
+
+def fib_levels(low: float, high: float, direction: str = "up", ratios=_FIB_RATIOS) -> dict:
+    """Fibonacci retracement levels for a swing from `low` to `high`.
+
+    direction 'up'   : an UPTREND (low->high); levels are measured DOWN from the
+                       high (price = high - r*(high-low)), i.e. potential SUPPORTS
+                       on a pullback. 0%=high, 100%=low.
+    direction 'down' : a DOWNTREND (high->low); levels measured UP from the low
+                       (price = low + r*(high-low)), i.e. potential RESISTANCES on
+                       a bounce. 0%=low, 100%=high.
+    Returns {ratio: price}."""
+    rng = float(high) - float(low)
+    if direction == "up":
+        return {r: float(high) - r * rng for r in ratios}
+    elif direction == "down":
+        return {r: float(low) + r * rng for r in ratios}
+    raise ValueError("direction must be 'up' or 'down'")
+
+
+def obv(closes: np.ndarray, volumes: np.ndarray) -> np.ndarray:
+    """On-Balance Volume: cumulative signed volume (+vol on an up close, -vol on a
+    down close, 0 on unchanged). A rising OBV = ACCUMULATION, falling = distribution.
+    Starts at 0; one value per bar."""
+    c = np.asarray(closes, dtype=float); v = np.asarray(volumes, dtype=float)
+    out = np.zeros(c.size)
+    for t in range(1, c.size):
+        if c[t] > c[t - 1]:
+            out[t] = out[t - 1] + v[t]
+        elif c[t] < c[t - 1]:
+            out[t] = out[t - 1] - v[t]
+        else:
+            out[t] = out[t - 1]
+    return out
+
+
+def volume_profile_poc(highs, lows, volumes, bins: int = 24) -> float:
+    """Point of Control: the price bin that traded the MOST volume over the window
+    (the main ACCUMULATION / fair-value zone). Each bar spreads its volume evenly
+    across the price bins its high-low range covers; the bin with peak volume wins.
+    Returns that bin's center price."""
+    h = np.asarray(highs, dtype=float); l = np.asarray(lows, dtype=float)
+    v = np.asarray(volumes, dtype=float)
+    lo, hi = float(l.min()), float(h.max())
+    if hi <= lo:
+        return lo
+    edges = np.linspace(lo, hi, bins + 1)
+    centers = (edges[:-1] + edges[1:]) / 2.0
+    prof = np.zeros(bins)
+    for i in range(h.size):
+        b0 = max(0, int((l[i] - lo) / (hi - lo) * bins))
+        b1 = min(bins - 1, int((h[i] - lo) / (hi - lo) * bins))
+        if b1 < b0:
+            b0 = b1
+        share = v[i] / (b1 - b0 + 1)
+        prof[b0:b1 + 1] += share
+    return float(centers[int(np.argmax(prof))])
+
+
 def scale_sigma(sigma_bar: float, horizon: int, vr: float = 1.0) -> float:
     """Scale per-bar sigma to an N-bar horizon, honoring the variance ratio.
 
