@@ -384,6 +384,43 @@ def conformalize_band(records: list, model: str, band: str) -> dict:
             "cover_raw": cov_raw, "cover_adj": cov_adj}
 
 
+def conformal_validate(records: list, model: str, band: str,
+                       train_frac: float = 0.7, min_n: int = 20) -> dict | None:
+    """Walk-forward (out-of-sample) check of the conformal correction: learn the
+    delta on the FIRST `train_frac` of the records (by made_at) and MEASURE coverage
+    on the held-out remainder after applying it. Unlike conformalize_band (which
+    reports in-sample-of-the-correction coverage), this tells you whether the
+    correction GENERALIZES. Returns None below `min_n` scored records."""
+    lo_k, hi_k, level = _BAND_SPEC[band]
+    rows = [r for r in records
+            if r.get("realized") and model in r.get("cones", {}) and r.get("S0")]
+    rows.sort(key=lambda r: r.get("made_at_unix", 0))
+    if len(rows) < min_n:
+        return None
+    cut = int(len(rows) * train_frac)
+    train, test = rows[:cut], rows[cut:]
+    if not train or not test:
+        return None
+
+    def nonconf(r):
+        c = r["cones"][model]
+        return max(float(c[lo_k]) - float(r["realized"]["close"]),
+                   float(r["realized"]["close"]) - float(c[hi_k])) / float(r["S0"])
+
+    delta = conformal_delta([nonconf(r) for r in train], level)
+
+    def covered(r, d):
+        c = r["cones"][model]; y = float(r["realized"]["close"]); S0 = float(r["S0"])
+        return (float(c[lo_k]) - d * S0) <= y <= (float(c[hi_k]) + d * S0)
+
+    n = len(test)
+    cov_raw = sum(covered(r, 0.0) for r in test) / n
+    cov_adj = sum(covered(r, delta) for r in test) / n
+    return {"n_train": len(train), "n_test": n, "level": level,
+            "delta_frac": delta, "delta_bps": delta * 1e4,
+            "cover_raw_test": cov_raw, "cover_adj_test": cov_adj}
+
+
 def aci_next_alpha(alpha: float, target_alpha: float, covered: bool,
                    gamma: float = 0.05) -> float:
     """Adaptive Conformal Inference online update (Gibbs & Candes 2021):
@@ -524,6 +561,9 @@ def main():
     ap.add_argument("--extra-log", action="append", default=None,
                     help="conformal: additional log(s) to POOL with --log before computing "
                          "corrections (e.g. a backfill log, to reach min_n sooner). Repeatable.")
+    ap.add_argument("--validate", action="store_true",
+                    help="conformal: walk-forward OOS check (learn delta on train, measure "
+                         "coverage on held-out test) instead of writing the table.")
     ap.add_argument("--store", default=None,
                     help="score: score against collect.py's persistent CSV store dir "
                          "(per symbol/tf) instead of a live window on stdin")
@@ -544,6 +584,25 @@ def main():
         recs = read_log(args.log)
         for extra in (args.extra_log or []):        # pool a backfill log to reach min_n
             recs += read_log(extra)
+        if args.validate:
+            recs = _dedupe(recs)
+            groups: dict = {}
+            for r in recs:
+                if r.get("realized"):
+                    groups.setdefault(f"{r.get('symbol')}|{r.get('tf')}|{r.get('horizon_bars')}", []).append(r)
+            print(f"conformal WALK-FORWARD validation (train 70% -> test 30%, min_n={args.min_n})")
+            print(f"  {'group':22}{'band':>5}{'nTest':>7}{'raw':>7}{'adj_oos':>9}{'delta_bps':>11}")
+            any_row = False
+            for key in sorted(groups):
+                for band in ("90", "50"):
+                    v = conformal_validate(groups[key], "gaussian", band, min_n=args.min_n)
+                    if v:
+                        any_row = True
+                        print(f"  {key:22}{band:>5}{v['n_test']:>7}{v['cover_raw_test']:>7.2f}"
+                              f"{v['cover_adj_test']:>9.2f}{v['delta_bps']:>+11.1f}")
+            if not any_row:
+                print("  (no group has >= min_n scored forecasts yet — pool a backfill log)")
+            return
         rep = conformal_report(recs, min_n=args.min_n)
         out_path = args.conformal_out
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)

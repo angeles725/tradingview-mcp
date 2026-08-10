@@ -352,6 +352,22 @@ def test_conformalize_band_can_tighten_when_overwide():
     _assert(out["delta_frac"] <= 0.0, "over-wide band should tighten (delta<=0)")
 
 
+def test_conformal_validate_out_of_sample_split():
+    # 40 records, deliberately too-narrow 90% band; temporal 70/30 split. The delta
+    # learned on TRAIN must raise coverage on the held-out TEST (generalizes).
+    recs = [_scored(P5=99.0, P95=101.0, realized=100.0 + (i % 21 - 10) * 0.5, made=i)
+            for i in range(40)]
+    v = fc.conformal_validate(recs, "gaussian", "90", train_frac=0.7)
+    _assert(v["n_train"] == 28 and v["n_test"] == 12, "temporal 70/30 split")
+    _assert(v["delta_frac"] > 0.0, "under-covering band -> positive train delta")
+    _assert(v["cover_adj_test"] >= v["cover_raw_test"], "correction must not worsen OOS coverage")
+
+
+def test_conformal_validate_thin_returns_none():
+    recs = [_scored(P5=99.0, P95=101.0, realized=100.5, made=i) for i in range(4)]
+    _assert(fc.conformal_validate(recs, "gaussian", "90") is None, "too few records -> None")
+
+
 def test_aci_next_alpha_updates_toward_target():
     # Not covered at target miscoverage 0.1 -> alpha DECREASES (widen next interval).
     lo = fc.aci_next_alpha(0.10, 0.10, covered=False, gamma=0.05)
