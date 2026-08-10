@@ -36,6 +36,7 @@ deduction.
 | 9 | OHLCV collector: accumulating history past the 300-bar wall | [tvdecision-block9.md](tvdecision-block9.md) | dedup-by-time CSV store, forming-bar update, atomic save, stdlib-only, re-emit as bars JSON to feed the analysis tools |
 | 10 | Closing the feedback loop: gated recurring collection via hooks | [tvdecision-block10.md](tvdecision-block10.md) | hooks-not-cron rationale, throttle + TV-reachable gates, detached pull (~20ms), SessionStart+Stop wiring, portable path resolution |
 | 11 | Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary | [tvdecision-block11.md](tvdecision-block11.md) | five markets (CN/EU/US/JP/KR), continuous-vs-session boundary, horizon-in-bars trap, KOSPI orphan record, hook set 6->10, dual-gold-key hygiene note |
+| 12 | HAR-RV/Yang-Zhang cone volatility + conformal calibration layer | [tvdecision-block12.md](tvdecision-block12.md) | Rogers-Satchell/Yang-Zhang gap-robust vol, causal HAR-RV forecast, GARCH+HAR blended cone sigma, split-conformal/CQR correction + ACI, closed hook loop, layer dormant until min_n |
 
 ## Companion deliverable
 
@@ -56,8 +57,9 @@ deduction.
 - [x] OHLCV collector: accumulating history past the 300-bar wall -> [Block 9]
 - [x] Closing the feedback loop: gated recurring collection via hooks -> [Block 10]
 - [x] Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary -> [Block 11]
+- [x] HAR-RV/Yang-Zhang cone volatility + conformal calibration layer -> [Block 12]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 11 / 11 items captured
+- **Document outline (tvdecision focus)**: 12 / 12 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)

@@ -4,9 +4,9 @@
 
 <!-- research-state.v1 -->
 schema: research-state.v1
-covered_blocks: 14
-gaps_closed: 14
-known_gaps: 14
+covered_blocks: 15
+gaps_closed: 15
+known_gaps: 15
 investigable_open: 0
 requires_execution_open: 0
 blocked_open: 0
@@ -20,9 +20,9 @@ Two focuses share this corpus. Capability-hardening blocks use the `tradingview-
 indexed in [INDEX.md](INDEX.md); the trading analysis and decision-methodology blocks use the
 `tvdecision-` prefix and are indexed in [INDEX-DECISIONS.md](INDEX-DECISIONS.md).
 
-- **Covered blocks**: 14 (capability-hardening B1..B3 + tvdecision B1..B11)
-- **Coverage metric**: 14 / 14 outline items captured
-- **Last iteration**: 2026-08-10 - multi-market coverage + cash-index maturation boundary (tvdecision B11)
+- **Covered blocks**: 15 (capability-hardening B1..B3 + tvdecision B1..B12)
+- **Coverage metric**: 15 / 15 outline items captured
+- **Last iteration**: 2026-08-10 - HAR-RV/Yang-Zhang cone vol + conformal calibration layer (tvdecision B12)
 
 ## Document outline
 
@@ -51,6 +51,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | high | OHLCV collector: accumulating history past the 300-bar wall | `analysis/collect.py` + tests + live run | captured - tvB9 |
 | high | Closing the feedback loop: gated recurring collection via hooks | `analysis/collect-hook.sh` + `.claude/settings.json` + live run | captured - tvB10 |
 | high | Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary | `analysis/collect-hook.sh` + `analysis/forecast.py` + live run | captured - tvB11 |
+| high | HAR-RV/Yang-Zhang cone volatility + conformal calibration layer | `analysis/quant.py` + `analysis/forecast.py` + `analysis/analyze.py` + TDD run | captured - tvB12 |
 
 ## Iteration history
 
@@ -70,6 +71,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | 12 | 2026-08-05 | tvdecision: OHLCV collector (accumulate history to disk) | tvB9 | no / inline (authored `analysis/collect.py` + tests + live run) | 0 |
 | 13 | 2026-08-05 | tvdecision: gated recurring collection via Claude Code hooks | tvB10 | no / inline (authored `analysis/collect-hook.sh` + settings wiring + live run) | 0 |
 | 14 | 2026-08-10 | tvdecision: multi-market coverage + cash-index maturation boundary | tvB11 | no / inline (authored hook + forecast.py cites + live CDP run) | 0 |
+| 15 | 2026-08-10 | tvdecision: HAR-RV/Yang-Zhang cone vol + conformal calibration layer | tvB12 | no / inline (TDD authored quant/forecast/analyze + live run) | 0 |
 
 ## Blocked gaps
 
