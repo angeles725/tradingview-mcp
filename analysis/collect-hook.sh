@@ -25,7 +25,18 @@ PROJECT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Symbols to accumulate each tick. With >1 symbol the detached job briefly cycles
 # the live chart and restores the FIRST (primary, gold) at the end. Scoring is
 # symbol-correct (score --store), so a multi-symbol log never cross-scores.
-SYMBOLS=("OANDA:XAUUSD" "OANDA:EURUSD" "OANDA:SPX500USD" "OANDA:USDJPY" "OANDA:GBPUSD" "OANDA:AUDUSD")
+#
+# Multi-region coverage: the original FX/metals/US set is extended with four
+# CONTINUOUS index CFDs so calibration accumulates across the Asian, European
+# and US sessions:
+#   CN50USD  China A50 (Asian session)   DE30EUR  DAX / Germany (European)
+#   JP225USD Nikkei 225 (Asian session)  NAS100USD Nasdaq 100 (US)
+# Only near-24h CFDs are auto-collected. Cash indices (e.g. KRX:KOSPI) are
+# INTENTIONALLY EXCLUDED here: recorded near their close, the h-bar target lands
+# in the overnight gap where no bar ever prints, so the record can never mature
+# and the cone under-states the true overnight-gap risk. Forecast those on demand
+# only, while their market is live. See corpus/ multi-market notes.
+SYMBOLS=("OANDA:XAUUSD" "OANDA:EURUSD" "OANDA:SPX500USD" "OANDA:USDJPY" "OANDA:GBPUSD" "OANDA:AUDUSD" "OANDA:CN50USD" "OANDA:DE30EUR" "OANDA:JP225USD" "OANDA:NAS100USD")
 TF="15"
 THROTTLE_MIN=30
 HORIZON=4          # forecast horizon in bars (4 x 15m = next hour)
