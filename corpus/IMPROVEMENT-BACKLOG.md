@@ -79,14 +79,15 @@
 ## Testing procedure (IMPORTANT)
 The base `python3` has **no scipy**, so `python3 -m pytest` runs all scipy-dependent code
 (GARCH `optimize`, `mc_student_t`, HAC/`t.ppf`) in its `_HAS_SCIPY=False` fallback — those paths are
-NEVER exercised and scipy-guarded tests early-return, giving false green. Run the real suite with the
-scipy venv, which lacks pytest, via each file's standalone runner:
+NEVER exercised and scipy-guarded tests early-return, giving false green. **Always run `make test`**:
 ```
-VENV=~/.local/share/research-sdd-tools/venv/bin/python3   # scipy 1.18, numpy 2.5
-for f in analysis/test_*.py; do "$VENV" "$f"; done
+make test        # pinned to the scipy venv; fails closed if the interpreter lacks scipy/pytest
 ```
-Fixes touching scipy paths (#10 GARCH, #12, #1 HAC) MUST be validated this way. Adding pytest to the
-venv (or a `make test` that uses it) is itself a P3 procedure improvement.
+The scipy venv (`~/.local/share/research-sdd-tools/venv/bin/python3`, scipy 1.18 / numpy 2.5) now has
+pytest 9.1.1, so `make test` runs the real suite (122 passed). Fixes touching scipy paths
+(#10 GARCH, #12, #1 HAC) are validated by this same command — the false-green gap is closed by the
+`test-guard` target, which refuses any interpreter without scipy. **DONE 2026-08-10** (was P3):
+pytest added to the venv + `make test` at repo root. See retros/2026-08-07-scipy-venv-testing-gap.md.
 
 ## Calibration evidence (backfill, 2026-08-07)
 `analysis/backfill.py` walks NON-OVERLAPPING windows over the 479-bar gold store, forecasts from `bars[:t]`
