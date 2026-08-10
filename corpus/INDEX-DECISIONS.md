@@ -37,6 +37,7 @@ deduction.
 | 10 | Closing the feedback loop: gated recurring collection via hooks | [tvdecision-block10.md](tvdecision-block10.md) | hooks-not-cron rationale, throttle + TV-reachable gates, detached pull (~20ms), SessionStart+Stop wiring, portable path resolution |
 | 11 | Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary | [tvdecision-block11.md](tvdecision-block11.md) | five markets (CN/EU/US/JP/KR), continuous-vs-session boundary, horizon-in-bars trap, KOSPI orphan record, hook set 6->10, dual-gold-key hygiene note |
 | 12 | HAR-RV/Yang-Zhang cone volatility + conformal calibration layer | [tvdecision-block12.md](tvdecision-block12.md) | Rogers-Satchell/Yang-Zhang gap-robust vol, causal HAR-RV forecast, GARCH+HAR blended cone sigma, split-conformal/CQR correction + ACI, closed hook loop, layer dormant until min_n |
+| 13 | Activating the conformal layer: shared cone recipe + backfill-seeded correction | [tvdecision-block13.md](tvdecision-block13.md) | 778-forecast backfill A/B (new blend ~= old, cov90 nominal, 50% over-dispersed), drift bug in backfill._cones, quant.cone_sigma single source of truth, --extra-log pooling, hook seeds conformal.json from backfill, live gold verification |
 
 ## Companion deliverable
 
@@ -58,8 +59,9 @@ deduction.
 - [x] Closing the feedback loop: gated recurring collection via hooks -> [Block 10]
 - [x] Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary -> [Block 11]
 - [x] HAR-RV/Yang-Zhang cone volatility + conformal calibration layer -> [Block 12]
+- [x] Activating the conformal layer: shared cone recipe + backfill-seeded correction -> [Block 13]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 12 / 12 items captured
+- **Document outline (tvdecision focus)**: 13 / 13 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)
