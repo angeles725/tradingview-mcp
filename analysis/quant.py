@@ -610,6 +610,40 @@ def garman_klass_vol(o, h, l, c) -> float:
     return float(math.sqrt(np.mean(var)))
 
 
+def rogers_satchell_var(o, h, l, c) -> np.ndarray:
+    """Rogers-Satchell (1991) per-bar variance proxy. Unlike Garman-Klass it is
+    drift-INDEPENDENT (valid when the bar has a trend), and it is non-negative by
+    construction. Returned per bar so it can seed a realized-variance series for
+    HAR (each term is an intraday range, so overnight gaps never contaminate it).
+    """
+    o = np.asarray(o, dtype=float); h = np.asarray(h, dtype=float)
+    l = np.asarray(l, dtype=float); c = np.asarray(c, dtype=float)
+    return np.log(h / c) * np.log(h / o) + np.log(l / c) * np.log(l / o)
+
+
+def yang_zhang_vol(o, h, l, c) -> float:
+    """Yang-Zhang (2000) per-bar sigma. Minimum-variance among unbiased OHLC
+    estimators and the only classic one that handles OVERNIGHT GAPS correctly:
+    sigma^2 = Vo + k*Vc + (1-k)*Vrs, combining overnight (close->open), open->close,
+    and the drift-free Rogers-Satchell term. Falls back to Garman-Klass when there
+    are too few bars for the overnight-variance term.
+    """
+    o = np.asarray(o, dtype=float); h = np.asarray(h, dtype=float)
+    l = np.asarray(l, dtype=float); c = np.asarray(c, dtype=float)
+    n = c.size
+    if n < 2:
+        return 0.0
+    co = np.log(o[1:] / c[:-1])          # overnight (close_{t-1} -> open_t)
+    oc = np.log(c / o)                   # open -> close (same bar)
+    rs = rogers_satchell_var(o, h, l, c)
+    v_o = float(np.var(co, ddof=1)) if co.size > 1 else 0.0
+    v_c = float(np.var(oc, ddof=1)) if oc.size > 1 else 0.0
+    v_rs = float(np.mean(rs))
+    k = 0.34 / (1.34 + (n + 1.0) / (n - 1.0))
+    var = v_o + k * v_c + (1.0 - k) * v_rs
+    return float(math.sqrt(var)) if var > 0 else 0.0
+
+
 def garch11_vol(returns: np.ndarray):
     """
     Fit a GARCH(1,1) with STUDENT-t innovations and return the one-step-ahead
@@ -684,6 +718,54 @@ def scale_sigma(sigma_bar: float, horizon: int, vr: float = 1.0) -> float:
     if vr is None or not math.isfinite(vr) or vr <= 0:
         vr = 1.0
     return sigma_bar * math.sqrt(horizon * vr)
+
+
+def har_rv_forecast(rv: np.ndarray, windows=(1, 5, 22)) -> float:
+    """One-step-ahead realized-VARIANCE forecast via Corsi's (2009) HAR model.
+
+    HAR regresses next-period RV on trailing averages over three timescales
+    (short/medium/long) — the most consistently dominant out-of-sample volatility
+    model in the literature. `rv` is a per-bar realized-variance series (e.g.
+    Rogers-Satchell), so it is gap-robust. Features for target t are the trailing
+    means ENDING BEFORE t (strictly causal, no look-ahead). Falls back to the mean
+    RV when the series is shorter than the longest window, and clamps a degenerate
+    (non-finite or non-positive) fit back to that mean.
+    """
+    rv = np.asarray(rv, dtype=float)
+    n = rv.size
+    w_max = max(windows)
+    mean_rv = float(np.mean(rv)) if n else 0.0
+    if n <= w_max:                       # too short for a causal HAR design
+        return mean_rv
+    rows, targets = [], []
+    for t in range(w_max, n):
+        rows.append([float(np.mean(rv[t - w:t])) for w in windows])
+        targets.append(rv[t])
+    X = np.column_stack([np.ones(len(rows)), np.array(rows)])
+    y = np.array(targets)
+    coef, *_ = np.linalg.lstsq(X, y, rcond=None)
+    feat_next = np.array([1.0] + [float(np.mean(rv[n - w:n])) for w in windows])
+    pred = float(feat_next @ coef)
+    if not math.isfinite(pred) or pred <= 0.0:
+        return mean_rv
+    return pred
+
+
+def blend_sigma(*sigmas, weights=None) -> "float | None":
+    """Equal-weight (or `weights`-weighted) blend of several per-bar sigmas,
+    skipping None / non-finite operands. Used to combine the GARCH conditional
+    sigma with the HAR-RV forecast (the research consensus 50/50 cone input).
+    Returns None only when every operand is missing."""
+    vals, wts = [], []
+    for i, s in enumerate(sigmas):
+        if s is None or not math.isfinite(s):
+            continue
+        vals.append(float(s))
+        wts.append(weights[i] if weights is not None else 1.0)
+    if not vals:
+        return None
+    tot = sum(wts)
+    return sum(v * w for v, w in zip(vals, wts)) / tot if tot > 0 else None
 
 
 # --------------------------------------------------------------------------- #

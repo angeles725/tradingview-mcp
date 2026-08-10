@@ -602,6 +602,59 @@ def test_scale_sigma_uses_variance_ratio():
             "non-positive VR must fall back to sqrt(h)")
 
 
+# --------------------------------------------------------------------------- #
+# HAR-RV over Yang-Zhang (research-backed volatility upgrade)
+# --------------------------------------------------------------------------- #
+def test_rogers_satchell_var_nonnegative_and_zero_on_flat():
+    # Rogers-Satchell is a per-bar, drift-INDEPENDENT variance proxy; by
+    # construction it is >= 0 and exactly 0 when the bar has no range.
+    o = np.array([100.0, 101.0, 99.0])
+    h = np.array([100.0, 103.0, 100.0])
+    l = np.array([100.0, 100.0, 98.0])
+    c = np.array([100.0, 102.0, 98.5])
+    rs = q.rogers_satchell_var(o, h, l, c)
+    _assert(rs.shape == (3,), "one RS variance per bar")
+    _assert(np.all(rs >= -1e-15), "RS variance must be non-negative")
+    _assert(rs[0] == 0.0, "flat bar (O=H=L=C) must give exactly 0 variance")
+    _assert(rs[1] > 0.0, "a ranging bar must give positive variance")
+
+
+def test_yang_zhang_vol_positive_and_flat_is_zero():
+    o = np.array([100.0, 101.0, 100.5, 101.2, 100.8])
+    h = np.array([101.0, 102.0, 101.5, 101.9, 101.3])
+    l = np.array([99.5, 100.5, 100.0, 100.6, 100.1])
+    c = np.array([100.8, 101.0, 101.1, 100.9, 101.0])
+    yz = q.yang_zhang_vol(o, h, l, c)
+    _assert(yz > 0.0, "Yang-Zhang sigma must be positive on a ranging series")
+    _assert(math.isfinite(yz), "Yang-Zhang sigma must be finite")
+    flat = np.full(5, 50.0)
+    _assert(q.yang_zhang_vol(flat, flat, flat, flat) == 0.0,
+            "a perfectly flat series has zero Yang-Zhang volatility")
+
+
+def test_har_rv_forecast_recovers_constant_level():
+    # On a constant realized-variance series the HAR forecast must return that
+    # same level (no spurious drift), and never a negative variance.
+    rv = np.full(80, 4e-6)
+    pred = q.har_rv_forecast(rv, windows=(1, 5, 22))
+    _assert(abs(pred - 4e-6) < 1e-9, f"constant RV must forecast itself, got {pred}")
+    _assert(pred >= 0.0, "forecast variance must be non-negative")
+
+
+def test_har_rv_forecast_short_series_falls_back_to_mean():
+    rv = np.array([1e-6, 2e-6, 3e-6])   # shorter than the longest window
+    pred = q.har_rv_forecast(rv, windows=(1, 5, 22))
+    _assert(math.isfinite(pred) and pred > 0.0,
+            "short series must fall back to a finite positive mean, not crash")
+    _assert(abs(pred - float(np.mean(rv))) < 1e-12, "fallback must be the mean RV")
+
+
+def test_blend_sigma_equal_weight_and_skips_none():
+    _assert(abs(q.blend_sigma(0.02, 0.04) - 0.03) < 1e-12, "equal-weight mean")
+    _assert(abs(q.blend_sigma(0.02, None) - 0.02) < 1e-12, "None operands are skipped")
+    _assert(q.blend_sigma(None, None) is None, "all-None blend is None")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

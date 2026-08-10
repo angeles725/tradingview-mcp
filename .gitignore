@@ -9,4 +9,5 @@ rules.json
 # regenerable backtest calibration samples
 corpus/forecasts-backfill*.jsonl
 corpus/calibration.json
+corpus/conformal.json
 corpus/forecasts.jsonl.lock

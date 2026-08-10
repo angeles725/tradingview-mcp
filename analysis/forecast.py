@@ -254,6 +254,117 @@ def nearest_close(bars: list, target_unix: int, tol: int) -> float | None:
 
 
 # --------------------------------------------------------------------------- #
+# Conformal calibration layer — turn the coverage DIAGNOSTIC into an active
+# CORRECTION with a finite-sample marginal-coverage guarantee (split conformal /
+# CQR, Vovk; Romano et al. 2019). The band diagnostics say IF the cone is
+# miscalibrated; this says BY HOW MUCH to widen (or tighten) it to hit nominal.
+# --------------------------------------------------------------------------- #
+_BAND_SPEC = {"90": ("P5", "P95", 0.90), "50": ("P25", "P75", 0.50)}
+
+
+def conformal_delta(scores, level: float) -> float:
+    """Split-conformal radius: the smallest Q such that at least `level` of the
+    nonconformity `scores` are <= Q. That is the ceil((n+1)*level)-th order
+    statistic (clamped to the max when the index exceeds n — the finite-sample
+    correction that yields the >= level coverage guarantee). Empty -> 0."""
+    s = sorted(float(x) for x in scores)
+    n = len(s)
+    if n == 0:
+        return 0.0
+    idx = math.ceil((n + 1) * level)
+    if idx > n:
+        return s[-1]
+    if idx < 1:
+        return s[0]
+    return s[idx - 1]
+
+
+def conformalize_band(records: list, model: str, band: str) -> dict:
+    """For one model's `band` ('90'|'50'), compute the conformal correction from
+    scored records and report coverage BEFORE and AFTER applying it. Nonconformity
+    is E_i = max(lo - y, y - hi) / S0 (return-space, so it is scale-free across a
+    symbol's price); the additive correction is delta_frac. Adjusted band per
+    record = [lo - delta_frac*S0, hi + delta_frac*S0]. delta_frac may be negative
+    (an over-wide band is tightened). cover_adj >= level on the calibration set by
+    construction."""
+    lo_k, hi_k, level = _BAND_SPEC[band]
+    data, scores = [], []
+    for r in records:
+        if not r.get("realized") or model not in r.get("cones", {}):
+            continue
+        cone = r["cones"][model]
+        S0 = r.get("S0") or 0.0
+        if not S0:
+            continue
+        lo, hi = float(cone[lo_k]), float(cone[hi_k])
+        y = float(r["realized"]["close"])
+        scores.append(max(lo - y, y - hi) / S0)
+        data.append((lo, hi, y, S0))
+    n = len(data)
+    if n == 0:
+        return {"n": 0, "level": level, "delta_frac": 0.0, "delta_bps": 0.0,
+                "cover_raw": None, "cover_adj": None}
+    delta = conformal_delta(scores, level)
+    cov_raw = sum(1 for lo, hi, y, _ in data if lo <= y <= hi) / n
+    cov_adj = sum(1 for lo, hi, y, S0 in data
+                  if (lo - delta * S0) <= y <= (hi + delta * S0)) / n
+    return {"n": n, "level": level, "delta_frac": delta, "delta_bps": delta * 1e4,
+            "cover_raw": cov_raw, "cover_adj": cov_adj}
+
+
+def aci_next_alpha(alpha: float, target_alpha: float, covered: bool,
+                   gamma: float = 0.05) -> float:
+    """Adaptive Conformal Inference online update (Gibbs & Candes 2021):
+    alpha_{t+1} = alpha_t + gamma*(target_alpha - err_t), err_t = 0 if covered
+    else 1. A MISS lowers alpha (widen next interval); a HIT raises it (allow
+    tightening). Clamped to [0,1]. `alpha` is miscoverage (= 1 - nominal level)."""
+    err = 0.0 if covered else 1.0
+    a = alpha + gamma * (target_alpha - err)
+    return min(1.0, max(0.0, a))
+
+
+def apply_conformal_widening(cone: dict, delta90_frac: float, delta50_frac: float,
+                             S0: float) -> dict:
+    """Return a copy of a cone with its 90% (P5/P95) and 50% (P25/P75) bands
+    shifted OUT by the conformal deltas (in price = delta_frac*S0), leaving P50 and
+    p_up untouched. Re-sorts the five quantiles so the band stays monotone even if
+    a (negative) tightening delta would otherwise cross them."""
+    d90, d50 = delta90_frac * S0, delta50_frac * S0
+    vals = sorted([cone["P5"] - d90, cone["P25"] - d50, cone["P50"],
+                   cone["P75"] + d50, cone["P95"] + d90])
+    out = dict(cone)
+    out["P5"], out["P25"], out["P50"], out["P75"], out["P95"] = (float(v) for v in vals)
+    return out
+
+
+def conformal_report(records: list, min_n: int = 8) -> dict:
+    """Per 'symbol|tf|horizon' -> per model -> per band conformal correction, over
+    groups with at least `min_n` scored records (tail calibration is unreliable
+    below that). Mirrors coverage_table's grouping."""
+    records = _dedupe(records)
+    groups: dict = {}
+    for r in records:
+        if not r.get("realized"):
+            continue
+        key = f"{r.get('symbol')}|{r.get('tf')}|{r.get('horizon_bars')}"
+        groups.setdefault(key, []).append(r)
+    out: dict = {}
+    for key, recs in groups.items():
+        models: dict = {}
+        for m in MODELS:
+            bands = {}
+            for band in ("90", "50"):
+                cb = conformalize_band(recs, m, band)
+                if cb["n"] >= min_n:
+                    bands[band] = cb
+            if bands:
+                models[m] = bands
+        if models:
+            out[key] = models
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # I/O
 # --------------------------------------------------------------------------- #
 def read_log(path: str) -> list:
@@ -329,10 +440,15 @@ def score_pending(records: list, bars: list = None, store_dir: str = None,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["record", "score", "stats", "calibrate"])
+    ap.add_argument("cmd", choices=["record", "score", "stats", "calibrate", "conformal"])
     ap.add_argument("--log", default=DEFAULT_LOG)
     ap.add_argument("--out", default=os.path.join(os.path.dirname(DEFAULT_LOG), "calibration.json"),
                     help="calibrate: where to write the coverage table")
+    ap.add_argument("--conformal-out",
+                    default=os.path.join(os.path.dirname(DEFAULT_LOG), "conformal.json"),
+                    help="conformal: where to write the per-band correction table")
+    ap.add_argument("--min-n", type=int, default=20,
+                    help="conformal: minimum scored records per group to emit a correction")
     ap.add_argument("--store", default=None,
                     help="score: score against collect.py's persistent CSV store dir "
                          "(per symbol/tf) instead of a live window on stdin")
@@ -347,6 +463,25 @@ def main():
         with open(args.out, "w") as f:
             json.dump(tbl, f, indent=2)
         print(f"calibration table: {len(tbl)} symbol/horizon group(s) -> {args.out}")
+        return
+
+    if args.cmd == "conformal":
+        rep = conformal_report(read_log(args.log), min_n=args.min_n)
+        out_path = args.conformal_out
+        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+        with open(out_path, "w") as f:
+            json.dump(rep, f, indent=2)
+        print(f"conformal corrections: {len(rep)} group(s) "
+              f"(min_n={args.min_n}) -> {out_path}")
+        for key, models in rep.items():
+            for m, bands in models.items():
+                b = bands.get("90")
+                if b:
+                    print(f"  {key}  {m:<10} 90%: cover {b['cover_raw']:.2f}"
+                          f"->{b['cover_adj']:.2f}  delta {b['delta_bps']:+.1f}bps "
+                          f"(n={b['n']})")
+        if not rep:
+            print("  (no group has >= min_n scored forecasts yet — keep collecting)")
         return
 
     if args.cmd == "record":

@@ -91,6 +91,9 @@ def main():
     ap.add_argument("--calibration", default=None,
                     help="path to a forecast calibration.json; annotates the cone "
                          "with the band's REALIZED coverage for this symbol/horizon")
+    ap.add_argument("--conformal", default=None,
+                    help="path to a forecast conformal.json; WIDENS the cone bands by "
+                         "the learned conformal correction for this symbol/tf/horizon")
     args = ap.parse_args()
 
     data = load_bars(sys.stdin)
@@ -114,12 +117,21 @@ def main():
     v_ewma = q.ewma_vol(ret)
     v_park = q.parkinson_vol(h, l)
     v_gk = q.garman_klass_vol(o, h, l, c)
+    v_yz = q.yang_zhang_vol(o, h, l, c)
     garch = q.garch11_vol(ret)
     v_garch = garch[0] if garch else None
+    # HAR-RV over a per-bar Rogers-Satchell realized-variance series: the best-
+    # documented out-of-sample vol forecaster, and gap-robust (each RS term is an
+    # intraday range, so overnight jumps never contaminate it).
+    rs_var = q.rogers_satchell_var(o, h, l, c)
+    har_var = q.har_rv_forecast(rs_var)
+    v_har = har_var ** 0.5 if har_var and har_var > 0 else None
 
-    # Cone uses the conditional estimator (clustering-aware): GARCH if it fit,
-    # else EWMA. This is the honest "volatility of NOW".
-    sigma_cone = v_garch if v_garch else v_ewma
+    # Cone sigma blends the two conditional estimators the evidence favours —
+    # the GARCH(1,1) clustering-aware sigma and the HAR-RV forecast (50/50). Falls
+    # back to whichever is available, then to EWMA. This is the "volatility of NOW".
+    blended = q.blend_sigma(v_garch, v_har)
+    sigma_cone = blended if blended else v_ewma
     daily_pct = q.scale_sigma(sigma_cone, bars_per_day) * 100
 
     # --- RSI -------------------------------------------------------------
@@ -170,6 +182,7 @@ def main():
         "volatility_per_bar": {
             "close_to_close": v_cc, "ewma_0.94": v_ewma,
             "parkinson": v_park, "garman_klass": v_gk,
+            "yang_zhang": v_yz, "har_rv": v_har,
             "garch11": v_garch, "garch_params": garch[1] if garch else None,
             "cone_sigma_used": sigma_cone,
             "implied_daily_pct": daily_pct,
@@ -195,6 +208,28 @@ def main():
         entry = tbl.get(f"{args.symbol}|{args.tf}|{args.horizon}")
         if entry:
             report["realized_coverage"] = entry
+
+    # Active conformal correction: WIDEN (or tighten) each cone band by the learned
+    # split-conformal delta for this symbol/tf/horizon, so the RECORDED cone carries
+    # the coverage-restoring correction. No entry (or too little data) -> no change.
+    if args.conformal and os.path.exists(args.conformal):
+        try:
+            ctbl = json.load(open(args.conformal))
+        except (ValueError, OSError):
+            ctbl = {}
+        centry = ctbl.get(f"{args.symbol}|{args.tf}|{args.horizon}")
+        if centry:
+            import forecast as fc
+            applied = {}
+            for m, cone in report["monte_carlo"].items():
+                bands = centry.get(m, {})
+                d90 = bands.get("90", {}).get("delta_frac", 0.0) if bands else 0.0
+                d50 = bands.get("50", {}).get("delta_frac", 0.0) if bands else 0.0
+                if d90 or d50:
+                    report["monte_carlo"][m] = fc.apply_conformal_widening(cone, d90, d50, S0)
+                    applied[m] = {"delta90_frac": d90, "delta50_frac": d50}
+            if applied:
+                report["conformal_applied"] = applied
 
     if args.json:
         print(json.dumps(report, indent=2))

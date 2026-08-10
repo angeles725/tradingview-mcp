@@ -49,6 +49,10 @@ if [ -x "$VENV_PY" ]; then PY="$VENV_PY"; else PY="$(command -v python3)"; fi
 DATA="$PROJECT/analysis/data"
 STAMP="$DATA/.last-collect-${TF}"
 LOG="$DATA/collect.log"
+# Learned conformal correction table (generated; refreshed each tick after scoring).
+# analyze consumes it to WIDEN recorded cones toward nominal coverage once enough
+# matured forecasts exist; until then it is empty and analyze is unaffected.
+CONF="$PROJECT/corpus/conformal.json"
 
 mkdir -p "$DATA"
 
@@ -82,7 +86,7 @@ nohup bash -c "
     '$NODE' src/cli/index.js ohlcv --count 300 >\"\$PULL\" 2>>'$LOG'
     # (a) accumulate history  (b) record a next-hour forecast
     '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
-    '$PY' analysis/analyze.py --symbol \"\$sym\" --tf '$TF' --horizon '$HORIZON' --json <\"\$PULL\" 2>>'$LOG' \
+    '$PY' analysis/analyze.py --symbol \"\$sym\" --tf '$TF' --horizon '$HORIZON' --conformal '$CONF' --json <\"\$PULL\" 2>>'$LOG' \
       | '$PY' analysis/forecast.py record >>'$LOG' 2>&1
     rm -f \"\$PULL\"
   done
@@ -90,6 +94,10 @@ nohup bash -c "
   # matched against ITS OWN symbol/tf store, so a multi-symbol log never scores
   # one symbol against another's bars, and off-live-window forecasts still score.
   '$PY' analysis/forecast.py score --store '$DATA' >>'$LOG' 2>&1
+  # (d) refresh the conformal correction table from all matured forecasts, so the
+  # NEXT tick's cones are widened toward nominal coverage. A no-op until a group
+  # reaches min_n scored records.
+  '$PY' analysis/forecast.py conformal --conformal-out '$CONF' >>'$LOG' 2>&1
   # restore the primary chart if we cycled symbols
   [ \$multi -eq 1 ] && '$NODE' src/cli/index.js symbol \"\$primary\" >>'$LOG' 2>&1
   echo \"[\$(date '+%F %T')] collect+forecast tick done (\${#syms[@]} sym)\" >>'$LOG'

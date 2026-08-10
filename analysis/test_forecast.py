@@ -232,6 +232,82 @@ def test_log_roundtrip(tmp=None):
     _assert(len(fc.read_log(path)) == 1, "rewrite truncates")
 
 
+# --------------------------------------------------------------------------- #
+# Conformal calibration layer (research-backed coverage guarantee)
+# --------------------------------------------------------------------------- #
+def _scored(P5, P95, realized, S0=100.0, P25=None, P75=None, model="gaussian", made=0):
+    """A minimal scored record carrying one model's cone and a realized close.
+    `made` makes the dedupe key unique (symbol/tf/made_at/horizon)."""
+    P25 = P25 if P25 is not None else (P5 + P95) / 2 - 1
+    P75 = P75 if P75 is not None else (P5 + P95) / 2 + 1
+    return {
+        "symbol": "X", "tf": "15", "horizon_bars": 4,
+        "made_at_unix": made, "target_unix": made + 3600, "S0": S0,
+        "cones": {model: {"P5": P5, "P25": P25, "P50": (P5 + P95) / 2,
+                          "P75": P75, "P95": P95, "p_up": 0.5, "model": model}},
+        "realized": {"close": realized, "up": realized > S0, "models": {}},
+    }
+
+
+def test_conformal_delta_split_quantile():
+    scores = [0.1, 0.2, 0.3, 0.4, 0.5]
+    # level 0.5 -> idx = ceil(6*0.5)=3 -> 3rd smallest = 0.3
+    _assert(abs(fc.conformal_delta(scores, 0.5) - 0.3) < 1e-12, "median-ish quantile")
+    # level 0.9 -> idx = ceil(6*0.9)=6 > n -> clamp to max = 0.5
+    _assert(abs(fc.conformal_delta(scores, 0.9) - 0.5) < 1e-12, "over-index clamps to max")
+    _assert(fc.conformal_delta([], 0.9) == 0.0, "empty scores -> 0 delta")
+
+
+def test_conformalize_band_guarantees_coverage():
+    # A deliberately TOO-NARROW 90% band: realized lands outside on ~half the records.
+    recs = []
+    for i in range(20):
+        y = 100.0 + (i - 10) * 0.5          # spread -5..+4.5 around S0
+        recs.append(_scored(P5=99.0, P95=101.0, realized=y))   # band only [99,101]
+    out = fc.conformalize_band(recs, "gaussian", "90")
+    _assert(out["cover_raw"] < 0.9, f"raw band must under-cover, got {out['cover_raw']}")
+    _assert(out["delta_frac"] > 0.0, "under-covering band must widen (delta>0)")
+    _assert(out["cover_adj"] >= 0.9 - 1e-9,
+            f"conformal correction must reach >=90% coverage, got {out['cover_adj']}")
+
+
+def test_conformalize_band_can_tighten_when_overwide():
+    # A band far wider than needed: every realized is well inside -> delta<=0 (tighten).
+    recs = [_scored(P5=0.0, P95=200.0, realized=100.0 + (i - 5) * 0.1) for i in range(20)]
+    out = fc.conformalize_band(recs, "gaussian", "90")
+    _assert(out["cover_raw"] == 1.0, "over-wide band covers everything raw")
+    _assert(out["delta_frac"] <= 0.0, "over-wide band should tighten (delta<=0)")
+
+
+def test_aci_next_alpha_updates_toward_target():
+    # Not covered at target miscoverage 0.1 -> alpha DECREASES (widen next interval).
+    lo = fc.aci_next_alpha(0.10, 0.10, covered=False, gamma=0.05)
+    _assert(lo < 0.10, "a miss must lower alpha (widen)")
+    # Covered -> alpha INCREASES slightly (allow tightening).
+    hi = fc.aci_next_alpha(0.10, 0.10, covered=True, gamma=0.05)
+    _assert(hi > 0.10, "a hit must raise alpha (tighten)")
+    _assert(0.0 <= fc.aci_next_alpha(0.0, 0.1, covered=False) <= 1.0, "alpha stays in [0,1]")
+
+
+def test_apply_conformal_widening_moves_only_outer_quantiles():
+    cone = {"P5": 95.0, "P25": 98.0, "P50": 100.0, "P75": 102.0, "P95": 105.0,
+            "p_up": 0.5, "model": "gaussian"}
+    out = fc.apply_conformal_widening(cone, delta90_frac=0.02, delta50_frac=0.01, S0=100.0)
+    _assert(out["P5"] == 95.0 - 2.0 and out["P95"] == 105.0 + 2.0, "90% band widened by 2")
+    _assert(out["P25"] == 98.0 - 1.0 and out["P75"] == 102.0 + 1.0, "50% band widened by 1")
+    _assert(out["P50"] == 100.0 and out["p_up"] == 0.5, "median and p_up untouched")
+    _assert(out["P5"] <= out["P25"] <= out["P50"] <= out["P75"] <= out["P95"], "stays ordered")
+
+
+def test_conformal_report_groups_by_symbol_tf_horizon():
+    recs = [_scored(P5=99.0, P95=101.0, realized=100.0 + (i - 10) * 0.4, made=i)
+            for i in range(20)]
+    rep = fc.conformal_report(recs, min_n=5)
+    _assert("X|15|4" in rep, "grouped by symbol|tf|horizon")
+    _assert("gaussian" in rep["X|15|4"], "model present")
+    _assert("90" in rep["X|15|4"]["gaussian"], "90 band present")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
