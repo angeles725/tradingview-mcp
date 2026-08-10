@@ -286,6 +286,25 @@ def test_score_record_reports_crps():
     _assert("crps_bps" in g and g["crps_bps"] >= 0, "CRPS also normalized to bps of S0")
 
 
+def test_trade_levels_from_cone_long_and_short():
+    cone = {"P5": 95.0, "P25": 98.0, "P50": 100.0, "P75": 102.0, "P95": 108.0}
+    lo = fc.trade_levels(cone, "long")
+    _assert(lo["entry"] == 100.0 and lo["stop_loss"] == 95.0 and lo["take_profit"] == 108.0,
+            "long: SL=P5, TP=P95, entry=P50")
+    _assert(abs(lo["risk"] - 5.0) < 1e-9 and abs(lo["reward"] - 8.0) < 1e-9, "risk/reward distances")
+    _assert(abs(lo["rr"] - 1.6) < 1e-9, "R:R = reward/risk")
+    _assert(abs(lo["sl_pct"] - 5.0) < 1e-9 and abs(lo["tp_pct"] - 8.0) < 1e-9, "distances in %")
+    sh = fc.trade_levels(cone, "short")
+    _assert(sh["stop_loss"] == 108.0 and sh["take_profit"] == 95.0, "short: SL=P95, TP=P5")
+    _assert(abs(sh["rr"] - 0.625) < 1e-9, "short R:R")
+
+
+def test_trade_levels_custom_entry():
+    cone = {"P5": 95.0, "P50": 100.0, "P95": 108.0}
+    r = fc.trade_levels(cone, "long", entry=101.0)
+    _assert(r["entry"] == 101.0 and abs(r["risk"] - 6.0) < 1e-9, "custom entry shifts risk")
+
+
 def test_conformal_delta_split_quantile():
     scores = [0.1, 0.2, 0.3, 0.4, 0.5]
     # level 0.5 -> idx = ceil(6*0.5)=3 -> 3rd smallest = 0.3

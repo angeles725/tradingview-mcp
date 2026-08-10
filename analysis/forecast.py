@@ -117,6 +117,31 @@ def pinball_loss(levels, values, y: float) -> float:
     return tot / len(levels)
 
 
+def trade_levels(cone: dict, side: str, entry: float = None) -> dict:
+    """Stop-loss / take-profit and risk measures derived from the forecast CONE
+    (the honest source: the band, not a guessed level). Long: SL at the downside
+    P5, TP at the upside P95. Short: mirrored. `entry` defaults to the cone median
+    P50. Returns entry, stop_loss, take_profit, risk/reward distances, R:R, and
+    SL/TP distances in %."""
+    P5, P95 = float(cone["P5"]), float(cone["P95"])
+    e = float(entry) if entry is not None else float(cone["P50"])
+    if side == "long":
+        sl, tp = P5, P95
+        risk, reward = e - sl, tp - e
+    elif side == "short":
+        sl, tp = P95, P5
+        risk, reward = sl - e, e - tp
+    else:
+        raise ValueError("side must be 'long' or 'short'")
+    rr = (reward / risk) if risk > 0 else float("inf")
+    return {
+        "side": side, "entry": e, "stop_loss": sl, "take_profit": tp,
+        "risk": risk, "reward": reward, "rr": rr,
+        "sl_pct": abs(e - sl) / e * 100 if e else float("nan"),
+        "tp_pct": abs(tp - e) / e * 100 if e else float("nan"),
+    }
+
+
 def crps_from_quantiles(levels, values, y: float) -> float:
     """CRPS approximated from the stored quantile forecast. CRPS = 2 * integral of
     the quantile (pinball) loss over tau in (0,1); this trapezoid-integrates the
