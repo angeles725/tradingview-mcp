@@ -4,9 +4,9 @@
 
 <!-- research-state.v1 -->
 schema: research-state.v1
-covered_blocks: 20
-gaps_closed: 20
-known_gaps: 20
+covered_blocks: 21
+gaps_closed: 21
+known_gaps: 21
 investigable_open: 0
 requires_execution_open: 0
 blocked_open: 0
@@ -20,9 +20,9 @@ Two focuses share this corpus. Capability-hardening blocks use the `tradingview-
 indexed in [INDEX.md](INDEX.md); the trading analysis and decision-methodology blocks use the
 `tvdecision-` prefix and are indexed in [INDEX-DECISIONS.md](INDEX-DECISIONS.md).
 
-- **Covered blocks**: 20 (capability-hardening B1..B3 + tvdecision B1..B17)
-- **Coverage metric**: 20 / 20 outline items captured
-- **Last iteration**: 2026-08-10 - periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation (tvdecision B17)
+- **Covered blocks**: 21 (capability-hardening B1..B3 + tvdecision B1..B18)
+- **Coverage metric**: 21 / 21 outline items captured
+- **Last iteration**: 2026-08-10 - confluence: Fibonacci + accumulation + candles + panoramas (tvdecision B18)
 
 ## Document outline
 
@@ -57,6 +57,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | high | Which market forecasts best: per-market calibration ranking + recommendation | `analysis/forecast.py` + backfill per-market measurement | captured - tvB15 |
 | high | Capability boundary: analysis works, execution/order-flow do not | `analysis/decide.py` + `src/cli/commands/replay.js` + `src/core/data.js` + replay demo | captured - tvB16 |
 | high | Periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation | `analysis/periodic.py` + `analysis/forecast.py` + `analysis/periodic-hook.sh` + live run | captured - tvB17 |
+| high | Confluence: Fibonacci + accumulation + candles + panoramas | `analysis/quant.py` + `analysis/confluence.py` + live run | captured - tvB18 |
 
 ## Iteration history
 
@@ -82,6 +83,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | 18 | 2026-08-10 | tvdecision: per-market calibration ranking + recommendation | tvB15 | no / inline (per-market backfill measurement) | 0 |
 | 19 | 2026-08-10 | tvdecision: capability boundary (replay demo + execution/depth/stream probes) | tvB16 | no / inline (live replay demo + CDP probes) | 0 |
 | 20 | 2026-08-10 | tvdecision: periodic monthly+weekly cadence + cone SL/TP + multi-TF annotation | tvB17 | no / inline (TDD + live cadence run) | 0 |
+| 21 | 2026-08-10 | tvdecision: confluence (Fibonacci + accumulation + candles + panoramas) | tvB18 | no / inline (TDD + live confluence run) | 0 |
 
 ## Blocked gaps
 
