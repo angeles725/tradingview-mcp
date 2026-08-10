@@ -1,0 +1,104 @@
+# TradingView MCP Capability Hardening - Research State
+
+> DOCUMENT-cycle state. The fixed outline replaces gap discovery and is mirrored in Engram under `research/tradingview-mcp/*`.
+
+<!-- research-state.v1 -->
+schema: research-state.v1
+covered_blocks: 14
+gaps_closed: 14
+known_gaps: 14
+investigable_open: 0
+requires_execution_open: 0
+blocked_open: 0
+deferred_open: 0
+undocumented_findings: 0
+<!-- /research-state.v1 -->
+
+## Coverage
+
+Two focuses share this corpus. Capability-hardening blocks use the `tradingview-` prefix and are
+indexed in [INDEX.md](INDEX.md); the trading analysis and decision-methodology blocks use the
+`tvdecision-` prefix and are indexed in [INDEX-DECISIONS.md](INDEX-DECISIONS.md).
+
+- **Covered blocks**: 14 (capability-hardening B1..B3 + tvdecision B1..B11)
+- **Coverage metric**: 14 / 14 outline items captured
+- **Last iteration**: 2026-08-10 - multi-market coverage + cash-index maturation boundary (tvdecision B11)
+
+## Document outline
+
+| Priority | Outline item | Artifact type / source | Status |
+|---|---|---|---|
+| high | Capability hardening and Replay safety | JavaScript source and tests | captured - B1 |
+| high | Offline verification and native review receipt | preserved local receipts | captured - B2 |
+| high | OpenCode exposure, restart requirement, and broker isolation limit | local config and session receipt | captured - B3 |
+
+## Document outline - tvdecision focus
+
+Trading analysis and decision methodology (distinct topic; indexed in
+[INDEX-DECISIONS.md](INDEX-DECISIONS.md)). Primary deliverable:
+[DECISION-PLAYBOOK.md](DECISION-PLAYBOOK.md).
+
+| Priority | Outline item | Artifact type / source | Status |
+|---|---|---|---|
+| high | Live-view setup and the fast chart-reading loop | JavaScript source + session receipt | captured - tvB1 |
+| high | Honest probabilistic analysis (range, not point) | scratchpad method scripts + session receipt | captured - tvB2 |
+| high | Rule validation: backtest + risk, and the Replay lesson | JavaScript source + scratchpad method scripts | captured - tvB3 |
+| high | Persistent quant toolkit: upgraded numerical methods | `analysis/` Python source + live run | captured - tvB4 |
+| high | Honest probability algorithms: fat-tail cones, conditional rigor, lookahead trap | `analysis/` Python source + live run | captured - tvB5 |
+| high | Honest backtest engine: costs, out-of-sample, independent trades | `analysis/backtest.py` + tests + live run | captured - tvB6 |
+| high | Regime and serial dependence: block bootstrap and the trend tautology | `analysis/` Python source + tests + live run | captured - tvB7 |
+| high | Decision engine: gated BUY/SELL/NO-TRADE, flat by default | `analysis/decide.py` + tests + live run | captured - tvB8 |
+| high | OHLCV collector: accumulating history past the 300-bar wall | `analysis/collect.py` + tests + live run | captured - tvB9 |
+| high | Closing the feedback loop: gated recurring collection via hooks | `analysis/collect-hook.sh` + `.claude/settings.json` + live run | captured - tvB10 |
+| high | Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary | `analysis/collect-hook.sh` + `analysis/forecast.py` + live run | captured - tvB11 |
+
+## Iteration history
+
+| # | Date | Outline item | Block | Delegated? / model tier | New gaps uncovered |
+|---|---|---|---|---|---|
+| 1 | 2026-08-03 | Capability hardening and Replay safety | B1 | no / inline (targeted source reads) | 0 |
+| 2 | 2026-08-03 | Offline verification and native review receipt | B2 | no / inline (preserved receipts) | 0 |
+| 3 | 2026-08-03 | OpenCode exposure and isolation boundary | B3 | no / inline (targeted config reads) | 0 |
+| 4 | 2026-08-04 | tvdecision: live-view setup and reading loop | tvB1 | no / inline (targeted source reads + session receipt) | 0 |
+| 5 | 2026-08-04 | tvdecision: honest probabilistic analysis | tvB2 | no / inline (scratchpad method scripts) | 0 |
+| 6 | 2026-08-04 | tvdecision: rule validation, backtest, Replay lesson | tvB3 | no / inline (source + method scripts) | 0 |
+| 7 | 2026-08-05 | tvdecision: persistent quant toolkit, upgraded numerical methods | tvB4 | no / inline (authored `analysis/` source + live run) | 0 |
+| 8 | 2026-08-05 | tvdecision: honest probability algorithms + lookahead fix | tvB5 | no / inline (authored `analysis/` source + tests + live run) | 0 |
+| 9 | 2026-08-05 | tvdecision: honest backtest engine (costs/OOS/independent trades) | tvB6 | no / inline (authored `analysis/backtest.py` + tests + live run) | 0 |
+| 10 | 2026-08-05 | tvdecision: regime detection + block bootstrap | tvB7 | no / inline (authored `analysis/` source + tests + live run) | 0 |
+| 11 | 2026-08-05 | tvdecision: gated decision engine (BUY/SELL/NO-TRADE) | tvB8 | no / inline (authored `analysis/decide.py` + tests + live run) | 0 |
+| 12 | 2026-08-05 | tvdecision: OHLCV collector (accumulate history to disk) | tvB9 | no / inline (authored `analysis/collect.py` + tests + live run) | 0 |
+| 13 | 2026-08-05 | tvdecision: gated recurring collection via Claude Code hooks | tvB10 | no / inline (authored `analysis/collect-hook.sh` + settings wiring + live run) | 0 |
+| 14 | 2026-08-10 | tvdecision: multi-market coverage + cash-index maturation boundary | tvB11 | no / inline (authored hook + forecast.py cites + live CDP run) | 0 |
+
+## Blocked gaps
+
+- none; document mode terminates on outline completion, not discovery exhaustion
+
+## Stop control
+
+- **Document outline remaining**: 0
+- **Open gaps - read-only investigable**: 0 (not used by DOCUMENT mode)
+- **Open gaps - requires-execution**: 0
+- **Open gaps - blocked**: 0
+- Budget cap: none
+
+## Dismissed file types
+
+The census was taken before scaffolding. DOCUMENT mode captures the supplied outline and does not audit the whole repository.
+
+- `.js` - 1,976 files / 12.3 MB - dismissed: mostly installed dependencies; outline-relevant project JavaScript is cited directly in B1-B2.
+- `.ts` - 1,203 files / 5.3 MB - dismissed: installed dependency declarations, outside the fixed capture outline.
+- `.map` - 489 files / 4.0 MB - dismissed: generated dependency source maps, outside the fixed capture outline.
+- `.json` - 280 files / 2.2 MB - dismissed: dependency metadata; the relevant review and OpenCode JSON records are cited in B2-B3.
+- `.md` - 254 files / 1.5 MB - dismissed: dependency documentation; relevant project documentation is cited in B1-B3.
+- `(no ext)` - 213 files / 0.3 MB - dismissed: dependency executables/metadata, outside the fixed capture outline.
+- `.cjs` - 122 files / 1.4 MB - dismissed: installed dependency runtime files, outside the fixed capture outline.
+- `.cts` - 121 files / 0.4 MB - dismissed: installed dependency declarations, outside the fixed capture outline.
+- `.jst` - 50 files / 0.1 MB - dismissed: dependency templates, outside the fixed capture outline.
+- `.yml` - 46 files / 0.0 MB - dismissed: dependency/CI metadata, outside the fixed capture outline.
+- `.mjs` - 29 files / 0.6 MB - dismissed: installed dependency modules, outside the fixed capture outline.
+- `.mts` - 16 files / 0.1 MB - dismissed: installed dependency declarations, outside the fixed capture outline.
+- `.def` - 10 files / 0.0 MB - dismissed: dependency native-build metadata, outside the fixed capture outline.
+- `.db-wal` - 1 file / 4.0 MB - dismissed: local tool cache, not subject evidence.
+- `.db` - 1 file / 1.8 MB - dismissed: local tool cache, not subject evidence.
