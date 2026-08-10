@@ -38,6 +38,7 @@ deduction.
 | 11 | Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary | [tvdecision-block11.md](tvdecision-block11.md) | five markets (CN/EU/US/JP/KR), continuous-vs-session boundary, horizon-in-bars trap, KOSPI orphan record, hook set 6->10, dual-gold-key hygiene note |
 | 12 | HAR-RV/Yang-Zhang cone volatility + conformal calibration layer | [tvdecision-block12.md](tvdecision-block12.md) | Rogers-Satchell/Yang-Zhang gap-robust vol, causal HAR-RV forecast, GARCH+HAR blended cone sigma, split-conformal/CQR correction + ACI, closed hook loop, layer dormant until min_n |
 | 13 | Activating the conformal layer: shared cone recipe + backfill-seeded correction | [tvdecision-block13.md](tvdecision-block13.md) | 778-forecast backfill A/B (new blend ~= old, cov90 nominal, 50% over-dispersed), drift bug in backfill._cones, quant.cone_sigma single source of truth, --extra-log pooling, hook seeds conformal.json from backfill, live gold verification |
+| 14 | Tier-2 refinements: CRPS, dedupe bugfix, gold hygiene, GJR rejected on A/B | [tvdecision-block14.md](tvdecision-block14.md) | CRPS full-distribution score, _dedupe prefers scored (latent bug), unify dual gold key, GJR-GARCH investigated + rejected (778-window A/B: null gain, 3-4x cost) |
 
 ## Companion deliverable
 
@@ -60,8 +61,9 @@ deduction.
 - [x] Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary -> [Block 11]
 - [x] HAR-RV/Yang-Zhang cone volatility + conformal calibration layer -> [Block 12]
 - [x] Activating the conformal layer: shared cone recipe + backfill-seeded correction -> [Block 13]
+- [x] Tier-2 refinements: CRPS, dedupe bugfix, gold hygiene, GJR rejected on A/B -> [Block 14]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 13 / 13 items captured
+- **Document outline (tvdecision focus)**: 14 / 14 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)

@@ -4,9 +4,9 @@
 
 <!-- research-state.v1 -->
 schema: research-state.v1
-covered_blocks: 16
-gaps_closed: 16
-known_gaps: 16
+covered_blocks: 17
+gaps_closed: 17
+known_gaps: 17
 investigable_open: 0
 requires_execution_open: 0
 blocked_open: 0
@@ -20,9 +20,9 @@ Two focuses share this corpus. Capability-hardening blocks use the `tradingview-
 indexed in [INDEX.md](INDEX.md); the trading analysis and decision-methodology blocks use the
 `tvdecision-` prefix and are indexed in [INDEX-DECISIONS.md](INDEX-DECISIONS.md).
 
-- **Covered blocks**: 16 (capability-hardening B1..B3 + tvdecision B1..B13)
-- **Coverage metric**: 16 / 16 outline items captured
-- **Last iteration**: 2026-08-10 - activating the conformal layer (shared cone recipe + backfill seed) (tvdecision B13)
+- **Covered blocks**: 17 (capability-hardening B1..B3 + tvdecision B1..B14)
+- **Coverage metric**: 17 / 17 outline items captured
+- **Last iteration**: 2026-08-10 - Tier-2 refinements: CRPS, dedupe bugfix, gold hygiene, GJR rejected (tvdecision B14)
 
 ## Document outline
 
@@ -53,6 +53,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | high | Multi-market coverage: continuous-CFD expansion and the cash-index maturation boundary | `analysis/collect-hook.sh` + `analysis/forecast.py` + live run | captured - tvB11 |
 | high | HAR-RV/Yang-Zhang cone volatility + conformal calibration layer | `analysis/quant.py` + `analysis/forecast.py` + `analysis/analyze.py` + TDD run | captured - tvB12 |
 | high | Activating the conformal layer: shared cone recipe + backfill-seeded correction | `analysis/quant.py` + `analysis/backfill.py` + `analysis/collect-hook.sh` + backfill A/B | captured - tvB13 |
+| high | Tier-2 refinements: CRPS, dedupe bugfix, gold hygiene, GJR rejected on A/B | `analysis/forecast.py` + `analysis/quant.py` + backfill A/B | captured - tvB14 |
 
 ## Iteration history
 
@@ -74,6 +75,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | 14 | 2026-08-10 | tvdecision: multi-market coverage + cash-index maturation boundary | tvB11 | no / inline (authored hook + forecast.py cites + live CDP run) | 0 |
 | 15 | 2026-08-10 | tvdecision: HAR-RV/Yang-Zhang cone vol + conformal calibration layer | tvB12 | no / inline (TDD authored quant/forecast/analyze + live run) | 0 |
 | 16 | 2026-08-10 | tvdecision: activating the conformal layer (shared recipe + backfill seed) | tvB13 | no / inline (TDD + 778-forecast backfill A/B) | 0 |
+| 17 | 2026-08-10 | tvdecision: Tier-2 (CRPS, dedupe fix, gold hygiene, GJR rejected) | tvB14 | no / inline (TDD + 778-forecast GJR A/B) | 0 |
 
 ## Blocked gaps
 
