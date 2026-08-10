@@ -142,6 +142,25 @@ def trade_levels(cone: dict, side: str, entry: float = None) -> dict:
     }
 
 
+def size_for_risk(levels: dict, equity: float, risk_pct: float = 1.0) -> dict:
+    """Position size from a fixed-fractional risk budget and the trade_levels stop.
+    Risk `risk_pct`% of `equity`; units = risk_cash / stop-distance. Returns units,
+    cash at risk, notional, cash reward at the take-profit, leverage, and R:R. A
+    zero stop-distance yields zero units (never divides by zero)."""
+    entry = float(levels["entry"]); sl = float(levels["stop_loss"]); tp = float(levels["take_profit"])
+    risk_cash = equity * risk_pct / 100.0
+    per_unit = abs(entry - sl)
+    units = (risk_cash / per_unit) if per_unit > 0 else 0.0
+    notional = units * entry
+    return {
+        "equity": equity, "risk_pct": risk_pct, "risk_cash": risk_cash,
+        "units": units, "notional": notional,
+        "reward_cash": units * abs(tp - entry),
+        "leverage": (notional / equity) if equity else float("inf"),
+        "rr": levels.get("rr", float("nan")),
+    }
+
+
 def crps_from_quantiles(levels, values, y: float) -> float:
     """CRPS approximated from the stored quantile forecast. CRPS = 2 * integral of
     the quantile (pinball) loss over tau in (0,1); this trapezoid-integrates the

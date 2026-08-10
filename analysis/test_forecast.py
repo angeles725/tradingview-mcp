@@ -299,6 +299,23 @@ def test_trade_levels_from_cone_long_and_short():
     _assert(abs(sh["rr"] - 0.625) < 1e-9, "short R:R")
 
 
+def test_size_for_risk_from_levels():
+    lv = fc.trade_levels({"P5": 95.0, "P50": 100.0, "P95": 108.0}, "long")
+    s = fc.size_for_risk(lv, equity=10000.0, risk_pct=1.0)
+    _assert(abs(s["risk_cash"] - 100.0) < 1e-9, "1% of 10k = 100 cash at risk")
+    _assert(abs(s["units"] - 20.0) < 1e-9, "units = risk_cash / risk_per_unit (100/5)")
+    _assert(abs(s["notional"] - 2000.0) < 1e-9, "notional = units*entry")
+    _assert(abs(s["reward_cash"] - 160.0) < 1e-9, "reward_cash = units*(TP-entry)")
+    _assert(abs(s["leverage"] - 0.2) < 1e-9, "leverage = notional/equity")
+    _assert(abs(s["rr"] - 1.6) < 1e-9, "R:R carried from levels")
+
+
+def test_size_for_risk_zero_stop_distance_is_safe():
+    lv = fc.trade_levels({"P5": 100.0, "P50": 100.0, "P95": 100.0}, "long")
+    s = fc.size_for_risk(lv, equity=10000.0, risk_pct=1.0)
+    _assert(s["units"] == 0.0, "no stop distance -> no position (never divide by zero)")
+
+
 def test_trade_levels_custom_entry():
     cone = {"P5": 95.0, "P50": 100.0, "P95": 108.0}
     r = fc.trade_levels(cone, "long", entry=101.0)
