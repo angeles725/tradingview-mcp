@@ -44,6 +44,7 @@ deduction.
 | 17 | Periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation | [tvdecision-block17.md](tvdecision-block17.md) | trade_levels SL/TP from cone P5/P95, monthly(h22)+weekly-Monday(h5) forecasts, weekly review, HTML report, calendar-gated hook; multi-TF RSI/EMA500/S-R drawn |
 | 18 | Confluence: Fibonacci + accumulation + candles + bull/base/bear panoramas | [tvdecision-block18.md](tvdecision-block18.md) | fib_levels (up/down), obv + volume-profile POC (accumulation), 20-candle balance, scenarios; gold fib 0.618=4145 confirms weekly SL 4143 |
 | 19 | Actionable layer: risk-based position sizer + confluence price alerts | [tvdecision-block19.md](tvdecision-block19.md) | size_for_risk (units from stop-distance, notional/leverage/RR), live alerts at SL/Fib/TP/POC; action not prediction, direction still ~0.50 |
+| 20 | Walk-forward rigor: conformal 50%-band over-fits out-of-sample | [tvdecision-block20.md](tvdecision-block20.md) | conformal_validate (train70/test30), 90% band generalizes, 50% band over-tightens OOS (AUDUSD/GBPUSD/NAS100 below 0.50); in-sample number hid it; temper the 50% delta |
 
 ## Companion deliverable
 
@@ -72,8 +73,9 @@ deduction.
 - [x] Periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation -> [Block 17]
 - [x] Confluence: Fibonacci + accumulation + candles + bull/base/bear panoramas -> [Block 18]
 - [x] Actionable layer: risk-based position sizer + confluence price alerts -> [Block 19]
+- [x] Walk-forward rigor: conformal 50%-band over-fits out-of-sample -> [Block 20]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 19 / 19 items captured
+- **Document outline (tvdecision focus)**: 20 / 20 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)

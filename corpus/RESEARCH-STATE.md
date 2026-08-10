@@ -4,9 +4,9 @@
 
 <!-- research-state.v1 -->
 schema: research-state.v1
-covered_blocks: 22
-gaps_closed: 22
-known_gaps: 22
+covered_blocks: 23
+gaps_closed: 23
+known_gaps: 23
 investigable_open: 0
 requires_execution_open: 0
 blocked_open: 0
@@ -20,9 +20,9 @@ Two focuses share this corpus. Capability-hardening blocks use the `tradingview-
 indexed in [INDEX.md](INDEX.md); the trading analysis and decision-methodology blocks use the
 `tvdecision-` prefix and are indexed in [INDEX-DECISIONS.md](INDEX-DECISIONS.md).
 
-- **Covered blocks**: 22 (capability-hardening B1..B3 + tvdecision B1..B19)
-- **Coverage metric**: 22 / 22 outline items captured
-- **Last iteration**: 2026-08-10 - actionable layer: risk sizer + confluence alerts (tvdecision B19)
+- **Covered blocks**: 23 (capability-hardening B1..B3 + tvdecision B1..B20)
+- **Coverage metric**: 23 / 23 outline items captured
+- **Last iteration**: 2026-08-10 - walk-forward rigor: conformal 50%-band over-fits OOS (tvdecision B20)
 
 ## Document outline
 
@@ -59,6 +59,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | high | Periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation | `analysis/periodic.py` + `analysis/forecast.py` + `analysis/periodic-hook.sh` + live run | captured - tvB17 |
 | high | Confluence: Fibonacci + accumulation + candles + panoramas | `analysis/quant.py` + `analysis/confluence.py` + live run | captured - tvB18 |
 | high | Actionable layer: risk-based sizer + confluence price alerts | `analysis/forecast.py` + `src/cli/commands/alerts.js` + live run | captured - tvB19 |
+| high | Walk-forward rigor: conformal 50%-band over-fits out-of-sample | `analysis/forecast.py` + backfill walk-forward | captured - tvB20 |
 
 ## Iteration history
 
@@ -86,6 +87,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | 20 | 2026-08-10 | tvdecision: periodic monthly+weekly cadence + cone SL/TP + multi-TF annotation | tvB17 | no / inline (TDD + live cadence run) | 0 |
 | 21 | 2026-08-10 | tvdecision: confluence (Fibonacci + accumulation + candles + panoramas) | tvB18 | no / inline (TDD + live confluence run) | 0 |
 | 22 | 2026-08-10 | tvdecision: actionable layer (risk sizer + confluence alerts) | tvB19 | no / inline (TDD + live alerts/sizer) | 0 |
+| 23 | 2026-08-10 | tvdecision: walk-forward rigor (conformal 50%-band over-fits OOS) | tvB20 | no / inline (TDD + backfill walk-forward) | 0 |
 
 ## Blocked gaps
 
