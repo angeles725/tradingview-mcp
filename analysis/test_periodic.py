@@ -39,6 +39,15 @@ def test_horizon_override():
     _assert(rec["horizon_bars"] == 10, "explicit horizon overrides the default")
 
 
+def test_build_embeds_confluence():
+    rec = pf.build(_bars(200), "OANDA:XAUUSD", "D", "week", side="auto")
+    conf = rec.get("confluence")
+    _assert(conf is not None, "periodic record embeds the confluence read")
+    _assert("fib_bull" in conf and "scenarios" in conf and "rsi" in conf,
+            "confluence carries fibs, scenarios and RSI")
+    _assert(set(("bull", "base", "bear")) <= set(conf["scenarios"]), "bull/base/bear panoramas")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

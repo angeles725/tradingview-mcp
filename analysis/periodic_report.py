@@ -80,7 +80,24 @@ def _card(rec):
         <div><span>R:R</span><b>{lv['rr']:.2f}</b></div>
       </div>
       {rev_html}
+      {_confluence_html(rec.get("confluence"))}
     </article>"""
+
+
+def _confluence_html(conf):
+    if not conf:
+        return ""
+    fb = " · ".join(f"{k}:{v:.0f}" for k, v in conf.get("fib_bull", {}).items())
+    sc = conf.get("scenarios", {})
+    return f"""<div class="conf">
+      <div class="conf-h">Confluencia — {html.escape(conf.get('trend','?'))} · RSI {conf.get('rsi','?')}
+        ({html.escape(conf.get('rsi_state','?'))}) · {html.escape(conf.get('accumulation','?'))} · POC {conf.get('poc','?')}</div>
+      <div class="conf-fib">Fibo alcista: {fb}</div>
+      <ul class="pan">
+        <li class="p-bull"><b>Alcista:</b> {html.escape(sc.get('bull',''))}</li>
+        <li class="p-base"><b>Base:</b> {html.escape(sc.get('base',''))}</li>
+        <li class="p-bear"><b>Bajista:</b> {html.escape(sc.get('bear',''))}</li>
+      </ul></div>"""
 
 
 def render(rows, title="Pronósticos periódicos") -> str:
@@ -117,6 +134,11 @@ header{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
 .grid i{{font-style:normal;font-size:12px;color:var(--muted)}}
 .k-sl b{{color:var(--sl)}}.k-tp b{{color:var(--tp)}}
 .rev{{margin-top:10px;font-size:12px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px}}
+.conf{{margin-top:12px;border-top:1px solid var(--line);padding-top:10px;font-size:12px}}
+.conf-h{{font-weight:600;margin-bottom:4px}}.conf-fib{{color:var(--muted);margin-bottom:6px}}
+.pan{{margin:0;padding-left:0;list-style:none;display:grid;gap:4px}}
+.pan li{{padding:4px 8px;border-radius:6px;background:var(--bg);border:1px solid var(--line)}}
+.p-bull b{{color:var(--tp)}}.p-bear b{{color:var(--sl)}}.p-base b{{color:var(--muted)}}
 .note{{max-width:640px;color:var(--muted);font-size:12px;margin-top:8px}}
 </style></head><body>
 <h1>{html.escape(title)}</h1>

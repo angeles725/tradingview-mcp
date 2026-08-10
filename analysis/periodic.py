@@ -29,6 +29,7 @@ import numpy as np
 
 import quant as q
 import forecast as fc
+import confluence as cf
 
 STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "..", "corpus", "periodic.jsonl")
@@ -95,6 +96,12 @@ def build(bars, symbol, tf, period, side, horizon=None, seed=7) -> dict:
     }
     if period == "week":
         rec["last_week_review"] = _last_week_review(symbol, tf)
+    # Embed the confluence read (fibs / RSI / accumulation / panoramas) so the
+    # report and the Monday routine carry the descriptive context beside the cone.
+    try:
+        rec["confluence"] = cf.analyze(bars, symbol, tf)
+    except Exception:
+        rec["confluence"] = None
     return rec
 
 
