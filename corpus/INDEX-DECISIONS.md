@@ -41,6 +41,7 @@ deduction.
 | 14 | Tier-2 refinements: CRPS, dedupe bugfix, gold hygiene, GJR rejected on A/B | [tvdecision-block14.md](tvdecision-block14.md) | CRPS full-distribution score, _dedupe prefers scored (latent bug), unify dual gold key, GJR-GARCH investigated + rejected (778-window A/B: null gain, 3-4x cost) |
 | 15 | Which market forecasts best: per-market calibration ranking + recommendation | [tvdecision-block15.md](tvdecision-block15.md) | SPX500USD best-calibrated (calErr 0.06), EURUSD/GBPUSD sharpest, gold/DAX under-cover 90% (understate risk), Nasdaq/Nikkei over-disperse 50%; FX low pinball = low vol not skill |
 | 16 | Capability boundary: analysis works, execution and order-flow do not | [tvdecision-block16.md](tvdecision-block16.md) | replay forecast+decide loop works (NO-TRADE, correct), replay trade returns success but registers no position, data depth unavailable for CFDs, stream works but non-additive; toolkit is analyst not trader |
+| 17 | Periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation | [tvdecision-block17.md](tvdecision-block17.md) | trade_levels SL/TP from cone P5/P95, monthly(h22)+weekly-Monday(h5) forecasts, weekly review, HTML report, calendar-gated hook; multi-TF RSI/EMA500/S-R drawn |
 
 ## Companion deliverable
 
@@ -66,8 +67,9 @@ deduction.
 - [x] Tier-2 refinements: CRPS, dedupe bugfix, gold hygiene, GJR rejected on A/B -> [Block 14]
 - [x] Which market forecasts best: per-market calibration ranking + recommendation -> [Block 15]
 - [x] Capability boundary: analysis works, execution and order-flow do not -> [Block 16]
+- [x] Periodic monthly+weekly cadence with cone SL/TP + multi-TF annotation -> [Block 17]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 16 / 16 items captured
+- **Document outline (tvdecision focus)**: 17 / 17 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)
