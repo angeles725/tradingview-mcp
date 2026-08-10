@@ -218,8 +218,12 @@ def main():
             for m, cone in report["monte_carlo"].items():
                 bands = centry.get(m, {})
                 d90 = bands.get("90", {}).get("delta_frac", 0.0) if bands else 0.0
-                d50 = bands.get("50", {}).get("delta_frac", 0.0) if bands else 0.0
-                if d90 or d50:
+                # 50%-band correction is NOT applied live: the walk-forward check
+                # (tvdecision B20) showed it over-fits out-of-sample (over-tightens
+                # below nominal on several markets). Only the 90% band, which
+                # generalizes OOS, is corrected. d50 kept 0.
+                d50 = 0.0
+                if d90:
                     report["monte_carlo"][m] = fc.apply_conformal_widening(cone, d90, d50, S0)
                     applied[m] = {"delta90_frac": d90, "delta50_frac": d50}
             if applied:
