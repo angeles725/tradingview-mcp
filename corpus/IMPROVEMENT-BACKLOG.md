@@ -399,6 +399,18 @@ new reporting lead open.
   Reporting-only, never touches the cone. **S / med** — the single actionable "improve the forecasts" item
   surfaced this session (the 4-pass audit already closed the model-level defects).
 
+## Sixth-pass — ACI adaptive conformal REJECTED (2026-08-11, tvdecision B22)
+- **#22 [REJECTED] ACI online correction does not generalize [CERT-live]** — wired `aci_adapted_level` +
+  `conformalize_band(adaptive=)` + `conformal_report(adaptive=)` so the 90% delta adapts online (Gibbs-Candes
+  2021). In-sample it adapted sensibly (DE30 under-cover 0.87 -> widen to level 0.97 / +18.6 bps). But a
+  walk-forward (train 70/test 30, pooled live+backfill) showed it OVER-FITS OOS: mean cover90 raw 0.937 /
+  static 0.917 / **ACI 0.842** — it over-tightens over-covering markets below nominal (AUDUSD 0.86->0.62, SPX
+  0.93->0.75, USDJPY 0.96->0.79). Same failure class as B20's 50%-band. SHIPPED OFF
+  (`conformal_report(adaptive=False)` default); machinery kept. Tests: `test_aci_adapted_level_*`,
+  `test_conformalize_band_adaptive_*`. **Standing lesson: every adaptive/tuned correction has failed the
+  hold-out on this data; the cones are already near-nominal (raw OOS 0.94). Static per-symbol correction +
+  realized-coverage reporting remains the honest surface.**
+
 ## Suggested sequencing
 Quick wins first (all S-effort, each removes a real bias): **#6, #2, #4, #12, #15**. Then validity of the
 whole pipeline: **#1, #3, #5**. Then P2 method upgrades. Every fix lands with a test (strict TDD).

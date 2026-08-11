@@ -4,9 +4,9 @@
 
 <!-- research-state.v1 -->
 schema: research-state.v1
-covered_blocks: 24
-gaps_closed: 24
-known_gaps: 24
+covered_blocks: 25
+gaps_closed: 25
+known_gaps: 25
 investigable_open: 0
 requires_execution_open: 0
 blocked_open: 0
@@ -20,9 +20,10 @@ Two focuses share this corpus. Capability-hardening blocks use the `tradingview-
 indexed in [INDEX.md](INDEX.md); the trading analysis and decision-methodology blocks use the
 `tvdecision-` prefix and are indexed in [INDEX-DECISIONS.md](INDEX-DECISIONS.md).
 
-- **Covered blocks**: 24 (capability-hardening B1..B3 + tvdecision B1..B21)
-- **Coverage metric**: 24 / 24 outline items captured
+- **Covered blocks**: 25 (capability-hardening B1..B3 + tvdecision B1..B22)
+- **Coverage metric**: 25 / 25 outline items captured
 - **Last iteration**: 2026-08-10 - calibration integrity: contamination guard, target-dedup, pooled cov50 illusion (tvdecision B21)
+- **Last iteration**: 2026-08-11 - ACI adaptive conformal wired, walk-forward tested, REJECTED OOS (tvdecision B22)
 
 ## Document outline
 
@@ -61,6 +62,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | high | Actionable layer: risk-based sizer + confluence price alerts | `analysis/forecast.py` + `src/cli/commands/alerts.js` + live run | captured - tvB19 |
 | high | Walk-forward rigor: conformal 50%-band over-fits out-of-sample | `analysis/forecast.py` + backfill walk-forward | captured - tvB20 |
 | high | Calibration integrity: contamination guard, target-dedup, pooled cov50 illusion | `analysis/forecast.py` + `analysis/test_forecast.py` + live measurement | captured - tvB21 |
+| high | ACI adaptive conformal: wired, walk-forward tested, rejected out-of-sample | `analysis/forecast.py` + walk-forward | captured - tvB22 |
 
 ## Iteration history
 
@@ -90,6 +92,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | 22 | 2026-08-10 | tvdecision: actionable layer (risk sizer + confluence alerts) | tvB19 | no / inline (TDD + live alerts/sizer) | 0 |
 | 23 | 2026-08-10 | tvdecision: walk-forward rigor (conformal 50%-band over-fits OOS) | tvB20 | no / inline (TDD + backfill walk-forward) | 0 |
 | 24 | 2026-08-10 | tvdecision: calibration integrity (contamination guard, target-dedup, pooled cov50 illusion) | tvB21 | no / inline (TDD + live measurement) | 1 (backlog #21: independent-subset cov50 CI) |
+| 25 | 2026-08-11 | tvdecision: ACI adaptive conformal wired + rejected on walk-forward | tvB22 | no / inline (TDD + walk-forward OOS) | 0 |
 
 ## Blocked gaps
 
