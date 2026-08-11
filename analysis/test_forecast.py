@@ -136,6 +136,31 @@ def test_dedupe_effective_n_and_wilson():
     _assert((fc._wilson(5, 5)[1] - fc._wilson(5, 5)[0]) > (hi - lo) - 1.0, "n=5 CI is wide")
 
 
+def test_calibration_reports_independent_cover_50_ci():
+    # #21: the pooled cover_50 over overlapping forecasts overstates the evidence
+    # (a quiet regime keeps price inside P25-P75). cover_50_ci must be computed over
+    # the INDEPENDENT subset, exactly like cover_90_ci, so it cannot be inflated.
+    def mk(made, tgt, y):
+        rec = fc.build_record(_report())
+        rec["made_at_unix"] = made
+        rec["target_unix"] = tgt
+        return fc.score_record(rec, y)
+    # first two windows overlap (1 independent), third is separate -> n_eff = 2
+    recs = [mk(0, 100, 100.0), mk(50, 150, 100.0), mk(200, 300, 100.0)]
+    cal = fc.calibration(recs)
+    g = cal["models"]["gaussian"]
+    _assert("cover_50_ci" in g, "must report a 50% coverage CI")
+    lo, hi = g["cover_50_ci"]
+    _assert(0.0 <= lo <= hi <= 1.0, "valid Wilson interval")
+    # it must equal the Wilson interval over the INDEPENDENT subset, not the pool
+    indep = fc._independent_subset([r for r in fc._dedupe(recs) if r.get("realized")])
+    k = sum(r["realized"]["models"]["gaussian"]["in_50"] for r in indep)
+    exp = fc._wilson(k, len(indep))
+    _assert(abs(lo - exp[0]) < 1e-9 and abs(hi - exp[1]) < 1e-9,
+            f"cover_50_ci must be over the independent subset: {(lo, hi)} vs {exp}")
+    _assert(g.get("n_eff") == len(indep), "must expose the independent count per model")
+
+
 def test_pinball_bps_is_scale_invariant():
     # raw pinball is in PRICE units (BTC ~42 vs gold ~3 vs EURUSD ~0) -> not
     # comparable across symbols. pinball_bps normalizes by S0 so the SAME relative
