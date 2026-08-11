@@ -150,7 +150,7 @@ def main():
     # history rather than poison the log with another symbol's price.
     if args.ohlcv_store and fc.s0_contaminated(args.symbol, args.tf, rec["S0"], args.ohlcv_store):
         raise SystemExit(f"SKIP contaminated {args.symbol} {args.tf} S0={rec['S0']:.4f} "
-                         f"(>50% off store median — wrong-symbol pull)")
+                         f"(off store median — wrong-symbol pull)")
 
     if not args.no_store:
         os.makedirs(os.path.dirname(STORE), exist_ok=True)

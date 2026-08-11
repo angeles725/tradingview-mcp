@@ -578,13 +578,15 @@ def _store_bars(store_dir: str, symbol: str, tf: str) -> list:
 
 
 def s0_contaminated(symbol: str, tf, s0: float, store_dir: str,
-                    max_dev: float = 0.5) -> bool:
+                    max_dev: float = 0.15) -> bool:
     """RECORD-side cross-symbol contamination guard. A feed-not-ready symbol switch
     can hand a record another symbol's bars (EURUSD ~1.15 recorded at SPX's ~7757).
     Compare S0 to the symbol's OWN persistent-store median close: a deviation beyond
-    `max_dev` means the pull almost certainly belongs to another symbol. Returns
-    False (can't judge) when there is no store reference or S0 is missing — never a
-    false reject on a thin store."""
+    `max_dev` means the pull almost certainly belongs to another symbol. The default
+    0.15 catches even same-scale-neighbour swaps (EURUSD 1.15 vs GBPUSD 1.35, +17%)
+    that a looser 0.5 missed — a real 1h/1-day move for these instruments stays well
+    under 15%. Returns False (can't judge) when there is no store reference or S0 is
+    missing — never a false reject on a thin store."""
     if not s0:
         return False
     try:
@@ -720,7 +722,7 @@ def main():
         # poisoned calibration record that can never mature correctly.
         if args.store and s0_contaminated(rec["symbol"], rec["tf"], rec["S0"], args.store):
             print(f"SKIP contaminated {rec['symbol']} {rec['tf']}m S0={rec['S0']:.4f} "
-                  f"(>50% off store median — wrong-symbol pull) -> not recorded")
+                  f"(off store median — wrong-symbol pull) -> not recorded")
             return
         with _lock(args.log):
             append_log(args.log, rec)

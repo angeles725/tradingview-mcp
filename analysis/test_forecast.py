@@ -380,6 +380,13 @@ def test_s0_contaminated_flags_cross_symbol_price():
             "a normal EURUSD S0 must pass")
     _assert(fc.s0_contaminated("OANDA:EURUSD", "15", 1.15, "/nonexistent") is False,
             "no store reference -> cannot judge -> not flagged")
+    # tightened threshold (0.15): a GBPUSD-level price (~1.35, +17%) recorded for
+    # EURUSD is same-scale-neighbour contamination and must now be caught (it would
+    # have slipped through the old 0.5 threshold); a 2% drift must still pass.
+    _assert(fc.s0_contaminated("OANDA:EURUSD", "15", 1.35, d) is True,
+            "a same-scale neighbour price (+17%) must be flagged at the tight threshold")
+    _assert(fc.s0_contaminated("OANDA:EURUSD", "15", 1.173, d) is False,
+            "a legitimate ~2% drift must not be flagged")
 
 
 def test_crps_from_quantiles_properties():
