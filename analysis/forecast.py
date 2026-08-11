@@ -86,6 +86,11 @@ def build_record(report: dict) -> dict:
 
 
 DIR_EPS = 0.03   # p_up must be this far from 0.5 to count as a directional call
+# Cross-symbol contamination guard: nearest_close matches on TIME only, so a
+# mis-filtered multi-symbol window can hand a record another symbol's price. A
+# realized move beyond this fraction of S0 is not real for these instruments and
+# horizons -> refuse to score and leave the record pending for a correct source.
+MAX_REALIZED_JUMP = 0.20
 QUANTILE_LEVELS = (0.05, 0.25, 0.50, 0.75, 0.95)   # cone quantiles P5..P95
 
 
@@ -542,6 +547,9 @@ def score_pending(records: list, bars: list = None, store_dir: str = None,
         tol = max(int(r.get("bar_step_sec") or 0) // 2, 1)
         rc = nearest_close(src, int(r["target_unix"]), tol)
         if rc is not None:
+            S0 = r.get("S0")
+            if S0 and abs(rc / S0 - 1.0) > MAX_REALIZED_JUMP:
+                continue   # cross-symbol contamination: refuse, stay pending
             records[i] = score_record(r, rc)
             n += 1
     return records, n

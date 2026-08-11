@@ -89,6 +89,29 @@ def test_score_pending_symbol_filter_prevents_cross_scoring():
     _assert(out[1]["realized"] is None, "eur must NOT be scored against gold bars")
 
 
+def test_score_pending_rejects_absurd_cross_symbol_jump():
+    # Defense-in-depth beyond the symbol filter: nearest_close matches on TIME
+    # only, so a mis-filtered multi-symbol window can hand a record another
+    # symbol's price (e.g. GBPUSD ~1.35 scored against USDJPY ~159). A move that
+    # large over these horizons is impossible -> refuse to score, stay pending.
+    r = _report(); r["symbol"] = "OANDA:GBPUSD"; r["last_price"] = 1.35
+    for c in r["monte_carlo"].values():
+        for k in ("P5", "P25", "P50", "P75", "P95"):
+            c[k] = 1.35
+    rec = fc.build_record(r)
+    target = rec["target_unix"]
+    poison = [{"time": target, "open": 159.0, "high": 159.0, "low": 159.0,
+               "close": 159.0, "volume": 1}]
+    out, n = fc.score_pending([rec], bars=poison)
+    _assert(n == 0, f"absurd jump must not score, got {n}")
+    _assert(out[0]["realized"] is None, "record must stay pending after poison price")
+    # a sane close at the same time still scores normally
+    sane = [{"time": target, "open": 1.351, "high": 1.351, "low": 1.351,
+             "close": 1.351, "volume": 1}]
+    out2, n2 = fc.score_pending([fc.build_record(r)], bars=sane)
+    _assert(n2 == 1 and out2[0]["realized"] is not None, "sane close should score")
+
+
 def test_dedupe_effective_n_and_wilson():
     # exact duplicates (same symbol/tf/made/horizon) must collapse
     r1 = fc.score_record(fc.build_record(_report()), 100.0)
