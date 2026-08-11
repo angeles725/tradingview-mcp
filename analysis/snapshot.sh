@@ -61,7 +61,14 @@ pull() {  # pull <symbol> <tf>
   "$NODE" src/cli/index.js symbol "$1" >/dev/null 2>&1; sleep 2
   "$NODE" src/cli/index.js timeframe "$2" >/dev/null 2>&1; sleep 2
   local f; f="$(mktemp)"
-  "$NODE" src/cli/index.js ohlcv --count "$BARS" >"$f" 2>/dev/null
+  # --expect-symbol refuses wrong-symbol bars from a not-yet-settled feed switch;
+  # retry a few times letting it settle rather than record another symbol's price.
+  local try
+  for try in 1 2 3 4; do
+    "$NODE" src/cli/index.js ohlcv --count "$BARS" --expect-symbol "$1" >"$f" 2>/dev/null
+    grep -q '"close"' "$f" && break
+    sleep 2
+  done
   printf '%s' "$f"
 }
 # extract just the Monte Carlo cone block from an analyze.py run
