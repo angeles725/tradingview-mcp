@@ -415,6 +415,15 @@ new reporting lead open.
   any real move for these instruments. Purged the 2 live bad rows (0 resolved). Documented tvdecision B23.
   **S / high** — completes C3.
 
+- ~~**C5**~~ **[CERT] DONE 2026-08-11** — the ROOT cause, finally: `getOhlcv` (`src/core/data.js`) read the
+  bars series without verifying the symbol, so a feed-not-ready switch served the PREVIOUS symbol's bars —
+  contaminating the STORES (not just the log) for a long time (SPX store median 3768 vs ~7758; 97% cross-symbol).
+  Fix: getOhlcv reads `CHART_API.symbol()` and, with `--expect-symbol`, returns `{success:false, symbol-mismatch}`
+  instead of wrong bars; wired into both hook pulls. Source-level guard (3rd layer with C1/B21 scoring + C3/B23
+  record). Cleaned stores from the purged log's S0 medians as external reference (band [ref/1.5, ref*1.5]);
+  SPX 1032->353, USDJPY rebuilt; backfill/conformal regenerated. Live-verified. Documented tvdecision B24.
+  Commit `fd6c158`. **M / high** — closes the contamination arc at its source.
+
 ## Sixth-pass — ACI adaptive conformal REJECTED (2026-08-11, tvdecision B22)
 - **#22 [REJECTED] ACI online correction does not generalize [CERT-live]** — wired `aci_adapted_level` +
   `conformalize_band(adaptive=)` + `conformal_report(adaptive=)` so the 90% delta adapts online (Gibbs-Candes

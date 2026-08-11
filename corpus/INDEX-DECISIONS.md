@@ -77,8 +77,9 @@ deduction.
 - [x] Calibration integrity: contamination guard, target-dedup, pooled cov50 illusion -> [Block 21]
 - [x] ACI adaptive conformal: wired, walk-forward tested, REJECTED out-of-sample -> [Block 22]
 - [x] Record-side contamination guard + the threshold that was too loose -> [Block 23]
+- [x] Store contamination: source-level --expect-symbol guard + mass cleanup -> [Block 24]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 23 / 23 items captured
+- **Document outline (tvdecision focus)**: 24 / 24 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)
