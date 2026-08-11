@@ -373,14 +373,20 @@ def conformal_delta(scores, level: float) -> float:
     return s[idx - 1]
 
 
-def conformalize_band(records: list, model: str, band: str) -> dict:
+def conformalize_band(records: list, model: str, band: str,
+                      adaptive: bool = False, gamma: float = 0.05) -> dict:
     """For one model's `band` ('90'|'50'), compute the conformal correction from
     scored records and report coverage BEFORE and AFTER applying it. Nonconformity
     is E_i = max(lo - y, y - hi) / S0 (return-space, so it is scale-free across a
     symbol's price); the additive correction is delta_frac. Adjusted band per
     record = [lo - delta_frac*S0, hi + delta_frac*S0]. delta_frac may be negative
     (an over-wide band is tightened). cover_adj >= level on the calibration set by
-    construction."""
+    construction.
+
+    With `adaptive=True`, the split-conformal delta is taken at the ACI-adapted
+    coverage level (aci_adapted_level) instead of the fixed nominal level, so a live
+    regime shift that starts breaking the band widens the correction automatically.
+    The static-level delta is still reported as `static_delta_frac` for reference."""
     lo_k, hi_k, level = _BAND_SPEC[band]
     data, scores = [], []
     for r in records:
@@ -398,12 +404,17 @@ def conformalize_band(records: list, model: str, band: str) -> dict:
     if n == 0:
         return {"n": 0, "level": level, "delta_frac": 0.0, "delta_bps": 0.0,
                 "cover_raw": None, "cover_adj": None}
-    delta = conformal_delta(scores, level)
+    lvl = aci_adapted_level(records, model, band, gamma) if adaptive else level
+    delta = conformal_delta(scores, lvl)
     cov_raw = sum(1 for lo, hi, y, _ in data if lo <= y <= hi) / n
     cov_adj = sum(1 for lo, hi, y, S0 in data
                   if (lo - delta * S0) <= y <= (hi + delta * S0)) / n
-    return {"n": n, "level": level, "delta_frac": delta, "delta_bps": delta * 1e4,
-            "cover_raw": cov_raw, "cover_adj": cov_adj}
+    out = {"n": n, "level": level, "delta_frac": delta, "delta_bps": delta * 1e4,
+           "cover_raw": cov_raw, "cover_adj": cov_adj}
+    if adaptive:
+        out["aci_level"] = lvl
+        out["static_delta_frac"] = conformal_delta(scores, level)
+    return out
 
 
 def conformal_validate(records: list, model: str, band: str,
@@ -454,6 +465,31 @@ def aci_next_alpha(alpha: float, target_alpha: float, covered: bool,
     return min(1.0, max(0.0, a))
 
 
+def aci_adapted_level(records: list, model: str, band: str,
+                      gamma: float = 0.05) -> float:
+    """Replay ACI (Gibbs-Candes 2021) over a group's scored records in made_at
+    order, starting from the nominal miscoverage, and return the ADAPTED coverage
+    level (1 - alpha_T) to use for the NEXT forecast's split-conformal delta. A run
+    of raw-band MISSES lowers alpha -> raises the level -> conformal_delta picks a
+    higher order statistic (wider band); HITS relax it back toward nominal. Clamped
+    to [0.5, 0.999] so a streak can neither collapse nor explode the band. Empty or
+    single-group input returns the nominal level unchanged."""
+    lo_k, hi_k, level = _BAND_SPEC[band]
+    rows = [r for r in records
+            if r.get("realized") and model in r.get("cones", {}) and r.get("S0")]
+    rows.sort(key=lambda r: r.get("made_at_unix", 0))
+    if not rows:
+        return level
+    target_alpha = 1.0 - level
+    alpha = target_alpha
+    for r in rows:
+        c = r["cones"][model]
+        y = float(r["realized"]["close"])
+        covered = float(c[lo_k]) <= y <= float(c[hi_k])
+        alpha = aci_next_alpha(alpha, target_alpha, covered, gamma)
+    return min(0.999, max(0.5, 1.0 - alpha))
+
+
 def apply_conformal_widening(cone: dict, delta90_frac: float, delta50_frac: float,
                              S0: float) -> dict:
     """Return a copy of a cone with its 90% (P5/P95) and 50% (P25/P75) bands
@@ -468,10 +504,17 @@ def apply_conformal_widening(cone: dict, delta90_frac: float, delta50_frac: floa
     return out
 
 
-def conformal_report(records: list, min_n: int = 8) -> dict:
+def conformal_report(records: list, min_n: int = 8, adaptive: bool = False) -> dict:
     """Per 'symbol|tf|horizon' -> per model -> per band conformal correction, over
     groups with at least `min_n` scored records (tail calibration is unreliable
-    below that). Mirrors coverage_table's grouping."""
+    below that). Mirrors coverage_table's grouping.
+
+    `adaptive=False` (default, SHIPPED) uses the static split-conformal delta. The
+    ACI-adapted variant (`adaptive=True`) is available but NOT shipped: a
+    walk-forward check (tvdecision B22) showed it OVER-FITS out-of-sample — its
+    gamma-step over-tightens the over-covering markets below nominal (mean OOS
+    cover90 0.84 vs 0.92 static / 0.94 raw), the same failure the 50%-band
+    correction showed in B20. Kept as machinery for future regime-aware work."""
     records = _dedupe(records)
     groups: dict = {}
     for r in records:
@@ -485,7 +528,7 @@ def conformal_report(records: list, min_n: int = 8) -> dict:
         for m in MODELS:
             bands = {}
             for band in ("90", "50"):
-                cb = conformalize_band(recs, m, band)
+                cb = conformalize_band(recs, m, band, adaptive=adaptive)
                 if cb["n"] >= min_n:
                     bands[band] = cb
             if bands:

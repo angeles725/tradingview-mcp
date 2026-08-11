@@ -333,6 +333,38 @@ def test_dedupe_collapses_same_hourly_target_keeps_freshest():
     _assert(len(fc._dedupe([a, b])) == 2, "distinct targets must NOT collapse")
 
 
+def test_aci_adapted_level_widens_after_misses_tightens_after_hits():
+    # ACI online: a run of raw-band MISSES must raise the adapted coverage level
+    # above nominal (widen the next band); a run of HITS must lower it (tighten).
+    def mk(made, y):
+        rec = fc.build_record(_report())
+        rec["made_at_unix"] = made
+        rec["target_unix"] = made + 3600      # distinct targets -> all survive
+        return fc.score_record(rec, y)
+    misses = [mk(i * 4000, 130.0) for i in range(12)]   # 130 > P95=105 -> raw miss
+    hits = [mk(i * 4000, 100.0) for i in range(12)]      # 100 = median -> raw hit
+    lvl_miss = fc.aci_adapted_level(misses, "gaussian", "90")
+    lvl_hit = fc.aci_adapted_level(hits, "gaussian", "90")
+    _assert(lvl_miss > 0.90, f"misses must widen the level above nominal: {lvl_miss}")
+    _assert(lvl_hit < 0.90, f"hits must tighten the level below nominal: {lvl_hit}")
+
+
+def test_conformalize_band_adaptive_reports_aci_level_and_widens_on_misses():
+    def mk(made, y):
+        rec = fc.build_record(_report())
+        rec["made_at_unix"] = made
+        rec["target_unix"] = made + 3600
+        return fc.score_record(rec, y)
+    recs = [mk(i * 4000, 130.0) for i in range(12)]      # persistent misses
+    static = fc.conformalize_band(recs, "gaussian", "90")
+    adaptive = fc.conformalize_band(recs, "gaussian", "90", adaptive=True)
+    _assert("aci_level" not in static, "static mode must not emit aci_level")
+    _assert(adaptive.get("aci_level", 0) > 0.90, "adaptive level rises on persistent misses")
+    _assert(adaptive["delta_frac"] >= static["delta_frac"],
+            "adaptive band must widen at least as much as static on misses")
+    _assert("static_delta_frac" in adaptive, "adaptive must expose the static delta for reference")
+
+
 def test_crps_from_quantiles_properties():
     lv = fc.QUANTILE_LEVELS
     narrow = [98.0, 99.0, 100.0, 101.0, 102.0]
