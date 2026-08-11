@@ -399,6 +399,16 @@ new reporting lead open.
   Reporting-only, never touches the cone. **S / med** — the single actionable "improve the forecasts" item
   surfaced this session (the 4-pass audit already closed the model-level defects).
 
+## Seventh-pass — RECORD-side contamination guard (2026-08-11)
+- ~~**C3**~~ **[CERT] DONE 2026-08-11** — cross-symbol contamination has TWO sides; C1 (B21) fixed only the
+  SCORING side. Found 8 records (periodic daily batch 2026-08-09) with a wrong-symbol S0 from a feed-not-ready
+  switch race: EURUSD S0=7757 (SPX's price), SPX S0=1.15 (EURUSD's), USDJPY S0=4390 (gold's), etc. These can
+  never mature correctly (the MAX_REALIZED_JUMP scoring guard would reject them → dead pending). Fix:
+  `s0_contaminated(symbol, tf, s0, store_dir, max_dev=0.5)` compares S0 to the symbol's own OHLCV-store median;
+  wired into BOTH record paths — `forecast.py record --store` and `periodic.py --ohlcv-store` — and the two
+  hooks pass `$DATA`. A contaminated pull is skipped, not logged. Purged the 8 existing bad rows (0 resolved,
+  no calibration lost). Test `test_s0_contaminated_flags_cross_symbol_price`. **S / high** — extends C1/B21.
+
 ## Sixth-pass — ACI adaptive conformal REJECTED (2026-08-11, tvdecision B22)
 - **#22 [REJECTED] ACI online correction does not generalize [CERT-live]** — wired `aci_adapted_level` +
   `conformalize_band(adaptive=)` + `conformal_report(adaptive=)` so the 90% delta adapts online (Gibbs-Candes

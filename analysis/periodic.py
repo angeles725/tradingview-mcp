@@ -134,6 +134,9 @@ def main():
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--no-store", action="store_true", help="do not append to the store")
+    ap.add_argument("--ohlcv-store", default=None,
+                    help="per-symbol OHLCV store dir; enables the cross-symbol "
+                         "contamination guard (skip a wrong-symbol pull)")
     args = ap.parse_args()
 
     payload = json.load(sys.stdin)
@@ -141,6 +144,13 @@ def main():
     if len(bars) < 30:
         raise SystemExit(f"need >= 30 bars, got {len(bars)}")
     rec = build(bars, args.symbol, args.tf, args.period, args.side, args.horizon, args.seed)
+
+    # Cross-symbol contamination guard (same feed-not-ready race as the 15m record
+    # path): with an OHLCV store reference, skip an S0 wildly off the symbol's own
+    # history rather than poison the log with another symbol's price.
+    if args.ohlcv_store and fc.s0_contaminated(args.symbol, args.tf, rec["S0"], args.ohlcv_store):
+        raise SystemExit(f"SKIP contaminated {args.symbol} {args.tf} S0={rec['S0']:.4f} "
+                         f"(>50% off store median — wrong-symbol pull)")
 
     if not args.no_store:
         os.makedirs(os.path.dirname(STORE), exist_ok=True)

@@ -577,6 +577,28 @@ def _store_bars(store_dir: str, symbol: str, tf: str) -> list:
     return rows
 
 
+def s0_contaminated(symbol: str, tf, s0: float, store_dir: str,
+                    max_dev: float = 0.5) -> bool:
+    """RECORD-side cross-symbol contamination guard. A feed-not-ready symbol switch
+    can hand a record another symbol's bars (EURUSD ~1.15 recorded at SPX's ~7757).
+    Compare S0 to the symbol's OWN persistent-store median close: a deviation beyond
+    `max_dev` means the pull almost certainly belongs to another symbol. Returns
+    False (can't judge) when there is no store reference or S0 is missing — never a
+    false reject on a thin store."""
+    if not s0:
+        return False
+    try:
+        rows = _store_bars(store_dir, symbol, tf)
+    except Exception:
+        return False
+    closes = sorted(float(b["close"]) for b in rows
+                    if b.get("close") not in (None, "") and float(b["close"]) > 0)
+    if len(closes) < 20:
+        return False
+    med = closes[len(closes) // 2]
+    return med > 0 and abs(s0 / med - 1.0) > max_dev
+
+
 def score_pending(records: list, bars: list = None, store_dir: str = None,
                   symbol: str = None) -> tuple:
     """Score every unrealized record in place and return (records, n_scored).
@@ -692,6 +714,14 @@ def main():
     if args.cmd == "record":
         report = json.load(sys.stdin)
         rec = build_record(report)
+        # Cross-symbol contamination guard: with a --store reference, refuse to
+        # record an S0 that is wildly off the symbol's own history (a feed-not-ready
+        # switch race handed us another symbol's bars). Better a skipped tick than a
+        # poisoned calibration record that can never mature correctly.
+        if args.store and s0_contaminated(rec["symbol"], rec["tf"], rec["S0"], args.store):
+            print(f"SKIP contaminated {rec['symbol']} {rec['tf']}m S0={rec['S0']:.4f} "
+                  f"(>50% off store median — wrong-symbol pull) -> not recorded")
+            return
         with _lock(args.log):
             append_log(args.log, rec)
         print(f"recorded {rec['symbol']} {rec['tf']}m h={rec['horizon_bars']} "

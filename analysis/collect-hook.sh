@@ -93,7 +93,7 @@ nohup bash -c "
     # (a) accumulate history  (b) record a next-hour forecast
     '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
     '$PY' analysis/analyze.py --symbol \"\$sym\" --tf '$TF' --horizon '$HORIZON' --conformal '$CONF' --json <\"\$PULL\" 2>>'$LOG' \
-      | '$PY' analysis/forecast.py record >>'$LOG' 2>&1
+      | '$PY' analysis/forecast.py record --store '$DATA' >>'$LOG' 2>&1
     rm -f \"\$PULL\"
   done
   # (c) score ALL matured forecasts in ONE symbol-correct pass: each record is

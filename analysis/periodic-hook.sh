@@ -56,10 +56,10 @@ nohup bash -c "
     PULL=\$(mktemp)
     '$NODE' src/cli/index.js ohlcv --count 300 >\"\$PULL\" 2>>'$LOG'
     if [ $do_month -eq 1 ]; then
-      '$PY' analysis/periodic.py --symbol \"\$sym\" --tf '$TF' --period month --side auto <\"\$PULL\" >>'$LOG' 2>&1
+      '$PY' analysis/periodic.py --symbol \"\$sym\" --tf '$TF' --period month --side auto --ohlcv-store '$DATA' <\"\$PULL\" >>'$LOG' 2>&1
     fi
     if [ $do_week -eq 1 ]; then
-      '$PY' analysis/periodic.py --symbol \"\$sym\" --tf '$TF' --period week --side auto <\"\$PULL\" >>'$LOG' 2>&1
+      '$PY' analysis/periodic.py --symbol \"\$sym\" --tf '$TF' --period week --side auto --ohlcv-store '$DATA' <\"\$PULL\" >>'$LOG' 2>&1
     fi
     rm -f \"\$PULL\"
   done

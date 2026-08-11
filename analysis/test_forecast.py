@@ -365,6 +365,23 @@ def test_conformalize_band_adaptive_reports_aci_level_and_widens_on_misses():
     _assert("static_delta_frac" in adaptive, "adaptive must expose the static delta for reference")
 
 
+def test_s0_contaminated_flags_cross_symbol_price():
+    # RECORD-side contamination guard: a feed-not-ready symbol switch can hand the
+    # record another symbol's price. Compared to the symbol's own store median, a
+    # cross-symbol S0 is wildly off and must be flagged; a normal S0 must pass.
+    import collect
+    d = tempfile.mkdtemp()
+    rows = [{"time": 1000 + i * 900, "open": 1.15, "high": 1.151, "low": 1.149,
+             "close": 1.15, "volume": 10} for i in range(30)]
+    collect.save_store(collect.store_path(d, "OANDA:EURUSD", "15"), rows)
+    _assert(fc.s0_contaminated("OANDA:EURUSD", "15", 7757.0, d) is True,
+            "an SPX-level price recorded for EURUSD must be flagged")
+    _assert(fc.s0_contaminated("OANDA:EURUSD", "15", 1.152, d) is False,
+            "a normal EURUSD S0 must pass")
+    _assert(fc.s0_contaminated("OANDA:EURUSD", "15", 1.15, "/nonexistent") is False,
+            "no store reference -> cannot judge -> not flagged")
+
+
 def test_crps_from_quantiles_properties():
     lv = fc.QUANTILE_LEVELS
     narrow = [98.0, 99.0, 100.0, 101.0, 102.0]
