@@ -36,7 +36,7 @@ PROJECT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # in the overnight gap where no bar ever prints, so the record can never mature
 # and the cone under-states the true overnight-gap risk. Forecast those on demand
 # only, while their market is live. See corpus/ multi-market notes.
-SYMBOLS=("OANDA:XAUUSD" "OANDA:EURUSD" "OANDA:SPX500USD" "OANDA:USDJPY" "OANDA:GBPUSD" "OANDA:AUDUSD" "OANDA:CN50USD" "OANDA:DE30EUR" "OANDA:JP225USD" "OANDA:NAS100USD")
+SYMBOLS=("OANDA:XAUUSD" "OANDA:EURUSD" "OANDA:SPX500USD" "OANDA:USDJPY" "OANDA:GBPUSD" "OANDA:AUDUSD" "OANDA:CN50USD" "OANDA:DE30EUR" "OANDA:JP225USD" "OANDA:NAS100USD" "OANDA:HK33HKD" "OANDA:XAGUSD" "OANDA:WTICOUSD" "OANDA:UK100GBP" "OANDA:US2000USD" "OANDA:USDCAD")
 TF="15"
 THROTTLE_MIN=30
 HORIZON=4          # forecast horizon in bars (4 x 15m = next hour)
