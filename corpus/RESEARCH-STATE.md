@@ -4,9 +4,9 @@
 
 <!-- research-state.v1 -->
 schema: research-state.v1
-covered_blocks: 25
-gaps_closed: 25
-known_gaps: 25
+covered_blocks: 26
+gaps_closed: 26
+known_gaps: 26
 investigable_open: 0
 requires_execution_open: 0
 blocked_open: 0
@@ -20,10 +20,11 @@ Two focuses share this corpus. Capability-hardening blocks use the `tradingview-
 indexed in [INDEX.md](INDEX.md); the trading analysis and decision-methodology blocks use the
 `tvdecision-` prefix and are indexed in [INDEX-DECISIONS.md](INDEX-DECISIONS.md).
 
-- **Covered blocks**: 25 (capability-hardening B1..B3 + tvdecision B1..B22)
-- **Coverage metric**: 25 / 25 outline items captured
+- **Covered blocks**: 26 (capability-hardening B1..B3 + tvdecision B1..B23)
+- **Coverage metric**: 26 / 26 outline items captured
 - **Last iteration**: 2026-08-10 - calibration integrity: contamination guard, target-dedup, pooled cov50 illusion (tvdecision B21)
 - **Last iteration**: 2026-08-11 - ACI adaptive conformal wired, walk-forward tested, REJECTED OOS (tvdecision B22)
+- **Last iteration**: 2026-08-11 - record-side contamination guard + threshold tightening (tvdecision B23)
 
 ## Document outline
 
@@ -63,6 +64,7 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | high | Walk-forward rigor: conformal 50%-band over-fits out-of-sample | `analysis/forecast.py` + backfill walk-forward | captured - tvB20 |
 | high | Calibration integrity: contamination guard, target-dedup, pooled cov50 illusion | `analysis/forecast.py` + `analysis/test_forecast.py` + live measurement | captured - tvB21 |
 | high | ACI adaptive conformal: wired, walk-forward tested, rejected out-of-sample | `analysis/forecast.py` + walk-forward | captured - tvB22 |
+| high | Record-side contamination guard + the threshold that was too loose | `analysis/forecast.py` + `analysis/periodic.py` + live measurement | captured - tvB23 |
 
 ## Iteration history
 

@@ -76,8 +76,9 @@ deduction.
 - [x] Walk-forward rigor: conformal 50%-band over-fits out-of-sample -> [Block 20]
 - [x] Calibration integrity: contamination guard, target-dedup, pooled cov50 illusion -> [Block 21]
 - [x] ACI adaptive conformal: wired, walk-forward tested, REJECTED out-of-sample -> [Block 22]
+- [x] Record-side contamination guard + the threshold that was too loose -> [Block 23]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 22 / 22 items captured
+- **Document outline (tvdecision focus)**: 23 / 23 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)

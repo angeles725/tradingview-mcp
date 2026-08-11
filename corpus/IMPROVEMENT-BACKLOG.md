@@ -408,6 +408,12 @@ new reporting lead open.
   wired into BOTH record paths — `forecast.py record --store` and `periodic.py --ohlcv-store` — and the two
   hooks pass `$DATA`. A contaminated pull is skipped, not logged. Purged the 8 existing bad rows (0 resolved,
   no calibration lost). Test `test_s0_contaminated_flags_cross_symbol_price`. **S / high** — extends C1/B21.
+- ~~**C4**~~ **[CERT] DONE 2026-08-11** — C3's first threshold (max_dev=0.5) was too loose: a live batch
+  recorded SPX500 S0=4372 and USDJPY S0=4372 (both GOLD's price); SPX vs its median 7756 is only 44% off,
+  below 0.5, so the guard passed it (threshold 0.50 caught 1/2, 0.15 caught 2/2). Tightened default to
+  **max_dev=0.15** — catches same-scale-neighbour swaps (EURUSD 1.15 vs GBPUSD 1.35 = +17%) while staying above
+  any real move for these instruments. Purged the 2 live bad rows (0 resolved). Documented tvdecision B23.
+  **S / high** — completes C3.
 
 ## Sixth-pass — ACI adaptive conformal REJECTED (2026-08-11, tvdecision B22)
 - **#22 [REJECTED] ACI online correction does not generalize [CERT-live]** — wired `aci_adapted_level` +
