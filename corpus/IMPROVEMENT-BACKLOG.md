@@ -378,6 +378,27 @@ multiplier — a tuning knob that would risk overfitting n=105. **Decision (user
 do NOT fix.** Rely on the realized-coverage reporting, which now carries robust multi-asset backfill evidence.
 This EXTENDS the Task #3 "adaptive-vol — NO CHANGE warranted" finding to the tail specifically.
 
+## Fifth-pass — calibration-log integrity (2026-08-10, session findings, tvdecision B21)
+Findings from hardening the calibration LOG the coverage numbers are read from. Two fixed this session, one
+new reporting lead open.
+
+- ~~**C1**~~ **[CERT] DONE 2026-08-10** — cross-symbol contamination: `score_pending` matures via
+  `nearest_close` (time-only match), so a mis-filtered multi-symbol window scored GBPUSD (~1.35) against
+  USDJPY (~159) bars → +11681% realized moves polluting cov90. Fix: `MAX_REALIZED_JUMP=0.20` guard skips
+  scoring when `|rc/S0-1|>0.20`, leaving the record pending. Test
+  `test_score_pending_rejects_absurd_cross_symbol_jump`. Commit `06a03a9`. **S / high**
+- ~~**C2**~~ **[CERT] DONE 2026-08-10** — dedup was keyed on exact `made_at`, so overlapping hook ticks
+  double-counted the same target hour. Re-keyed `_dedupe` on `(symbol,tf,horizon,target_unix)` (scored beats
+  unscored, then freshest); also applied in `score` before `write_log` so the log self-cleans. Test
+  `test_dedupe_collapses_same_hourly_target_keeps_freshest`. Commit `6ff2060`. **S / med-high**
+- **#21 [OPEN] independent-subset cov50 CI reporting [INFER]** — `calibration` reports `n_eff` + Wilson
+  `cover_90_ci` over the independent subset (S7) but still surfaces only the POOLED `cover_50`. Live n=81
+  pooled cov50=0.65 looked wide, but n_eff=9 cov50=0.56 (nominal) — the pooled count over 81 autocorrelated
+  forecasts in a quiet regime (median move 0.064%) over-states the evidence; backfill cov50≈0.51 is fine.
+  Fix: report `cover_50` over the independent subset with its own Wilson CI, mirroring the 90% band.
+  Reporting-only, never touches the cone. **S / med** — the single actionable "improve the forecasts" item
+  surfaced this session (the 4-pass audit already closed the model-level defects).
+
 ## Suggested sequencing
 Quick wins first (all S-effort, each removes a real bias): **#6, #2, #4, #12, #15**. Then validity of the
 whole pipeline: **#1, #3, #5**. Then P2 method upgrades. Every fix lands with a test (strict TDD).

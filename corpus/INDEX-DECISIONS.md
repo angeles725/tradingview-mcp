@@ -74,8 +74,9 @@ deduction.
 - [x] Confluence: Fibonacci + accumulation + candles + bull/base/bear panoramas -> [Block 18]
 - [x] Actionable layer: risk-based position sizer + confluence price alerts -> [Block 19]
 - [x] Walk-forward rigor: conformal 50%-band over-fits out-of-sample -> [Block 20]
+- [x] Calibration integrity: contamination guard, target-dedup, pooled cov50 illusion -> [Block 21]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 20 / 20 items captured
+- **Document outline (tvdecision focus)**: 21 / 21 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)
