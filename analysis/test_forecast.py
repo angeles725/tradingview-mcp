@@ -284,6 +284,30 @@ def test_dedupe_prefers_scored_over_unscored():
         _assert(out[0]["realized"] is not None, "the scored copy must survive dedupe")
 
 
+def test_dedupe_collapses_same_hourly_target_keeps_freshest():
+    # Overlapping hook ticks record the SAME (symbol, tf, horizon, target_unix)
+    # more than once with different made_at. They must collapse to one, keeping the
+    # freshest forecast — so a target hour is never double-counted in calibration.
+    def mk(made, s0):
+        rec = fc.build_record(_report())
+        rec["made_at_unix"] = made
+        rec["target_unix"] = 5000          # same target hour for both
+        rec["S0"] = s0
+        return rec
+    out = fc._dedupe([mk(100, 100.0), mk(200, 101.0)])
+    _assert(len(out) == 1, f"same-target forecasts must collapse, got {len(out)}")
+    _assert(out[0]["made_at_unix"] == 200, "the freshest (latest made_at) must survive")
+    # a SCORED copy still beats a fresher UNSCORED one (never lose an outcome)
+    scored_old = fc.score_record(mk(100, 100.0), 100.0)
+    unscored_new = mk(300, 100.0)
+    out2 = fc._dedupe([unscored_new, scored_old])
+    _assert(len(out2) == 1 and out2[0]["realized"] is not None,
+            "a scored record must survive over a fresher unscored twin")
+    # distinct targets are independent forecasts -> both survive
+    a = mk(100, 100.0); b = mk(100, 100.0); b["target_unix"] = 9000
+    _assert(len(fc._dedupe([a, b])) == 2, "distinct targets must NOT collapse")
+
+
 def test_crps_from_quantiles_properties():
     lv = fc.QUANTILE_LEVELS
     narrow = [98.0, 99.0, 100.0, 101.0, 102.0]

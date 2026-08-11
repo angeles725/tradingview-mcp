@@ -220,16 +220,27 @@ def score_record(rec: dict, realized_close: float) -> dict:
 
 
 def _dedupe(records: list) -> list:
-    """Collapse exact duplicate forecasts (same symbol/tf/made_at/horizon). The hook
-    can record the same window twice, which would double-count coverage. A SCORED
-    copy always beats an unscored one (else calibration silently drops the realized
-    outcome); among copies of equal scored-status, last wins."""
+    """Collapse forecasts that predict the SAME (symbol, tf, horizon, target_unix).
+    Overlapping hook ticks can record the same target hour more than once, which
+    would double-count coverage. Keying on target (not made_at) folds those away:
+    two forecasts only share a target if built from the same last bar, so they are
+    genuinely redundant. A SCORED copy always beats an unscored one (else
+    calibration silently drops the realized outcome); among copies of equal
+    scored-status, the freshest forecast (latest made_at) wins."""
     seen = {}
     for r in records:
-        key = (r.get("symbol"), r.get("tf"), r.get("made_at_unix"), r.get("horizon_bars"))
+        key = (r.get("symbol"), r.get("tf"), r.get("horizon_bars"), r.get("target_unix"))
         prev = seen.get(key)
-        if prev is None or r.get("realized") is not None or prev.get("realized") is None:
+        if prev is None:
             seen[key] = r
+            continue
+        r_scored = r.get("realized") is not None
+        p_scored = prev.get("realized") is not None
+        if r_scored != p_scored:
+            if r_scored:                                     # scored beats unscored
+                seen[key] = r
+        elif (r.get("made_at_unix") or 0) >= (prev.get("made_at_unix") or 0):
+            seen[key] = r                                    # equal status: freshest wins
     return list(seen.values())
 
 
@@ -647,6 +658,9 @@ def main():
             records = read_log(args.log)
             records, n_scored = score_pending(records, bars=bars,
                                               store_dir=args.store, symbol=args.symbol)
+            # fold away same-target duplicates left by overlapping ticks so the
+            # persisted log stays clean (scored copies and freshest cones survive)
+            records = _dedupe(records)
             write_log(args.log, records)
         src = f"store {args.store}" if args.store else "live window"
         print(f"scored {n_scored} newly-matured forecast(s) from {src} [{args.log}]")
