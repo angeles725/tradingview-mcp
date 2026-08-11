@@ -89,7 +89,7 @@ nohup bash -c "
     # switch the chart only when accumulating >1 symbol; let it settle before pull
     if [ \$multi -eq 1 ]; then '$NODE' src/cli/index.js symbol \"\$sym\" >>'$LOG' 2>&1; sleep 3; fi
     PULL=\$(mktemp)
-    '$NODE' src/cli/index.js ohlcv --count 300 >\"\$PULL\" 2>>'$LOG'
+    '$NODE' src/cli/index.js ohlcv --count 300 --expect-symbol \"\$sym\" >\"\$PULL\" 2>>'$LOG'
     # (a) accumulate history  (b) record a next-hour forecast
     '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
     '$PY' analysis/analyze.py --symbol \"\$sym\" --tf '$TF' --horizon '$HORIZON' --conformal '$CONF' --json <\"\$PULL\" 2>>'$LOG' \

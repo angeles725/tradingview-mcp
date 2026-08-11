@@ -134,14 +134,21 @@ function buildGraphicsJS(collectionName, mapKey, filter) {
   `;
 }
 
-export async function getOhlcv({ count, summary } = {}) {
+// Ticker part after the last ':' — so "OANDA:SPX500USD" and "SPX500USD" match.
+function _tickerOf(sym) {
+  return String(sym || '').trim().split(':').pop().toUpperCase();
+}
+
+export async function getOhlcv({ count, summary, expectSymbol } = {}) {
   const limit = Math.min(count || 100, MAX_OHLCV_BARS);
   let data;
   try {
     data = await evaluate(`
       (function() {
+        var chartSymbol = '';
+        try { chartSymbol = ${CHART_API}.symbol(); } catch (e) {}
         var bars = ${BARS_PATH};
-        if (!bars || typeof bars.lastIndex !== 'function') return null;
+        if (!bars || typeof bars.lastIndex !== 'function') return {symbol: chartSymbol, bars: []};
         var result = [];
         var end = bars.lastIndex();
         var start = Math.max(bars.firstIndex(), end - ${limit} + 1);
@@ -149,10 +156,19 @@ export async function getOhlcv({ count, summary } = {}) {
           var v = bars.valueAt(i);
           if (v) result.push({time: v[0], open: v[1], high: v[2], low: v[3], close: v[4], volume: v[5] || 0});
         }
-        return {bars: result, total_bars: bars.size(), source: 'direct_bars'};
+        return {symbol: chartSymbol, bars: result, total_bars: bars.size(), source: 'direct_bars'};
       })()
     `);
   } catch { data = null; }
+
+  // Root-cause contamination guard: a feed-not-ready symbol switch can leave the
+  // bars series still serving the PREVIOUS symbol. When the caller states which
+  // symbol it expects, refuse mismatched bars instead of returning another
+  // symbol's prices (the record-side S0 guard is the downstream backstop).
+  if (expectSymbol && data && data.symbol && _tickerOf(data.symbol) !== _tickerOf(expectSymbol)) {
+    return { success: false, reason: 'symbol-mismatch',
+             expected: expectSymbol, actual: data.symbol };
+  }
 
   if (!data || !data.bars || data.bars.length === 0) {
     throw new Error('Could not extract OHLCV data. The chart may still be loading.');

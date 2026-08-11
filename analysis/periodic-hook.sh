@@ -54,7 +54,7 @@ nohup bash -c "
   for sym in \"\${syms[@]}\"; do
     '$NODE' src/cli/index.js symbol \"\$sym\" >>'$LOG' 2>&1; sleep 3
     PULL=\$(mktemp)
-    '$NODE' src/cli/index.js ohlcv --count 300 >\"\$PULL\" 2>>'$LOG'
+    '$NODE' src/cli/index.js ohlcv --count 300 --expect-symbol \"\$sym\" >\"\$PULL\" 2>>'$LOG'
     if [ $do_month -eq 1 ]; then
       '$PY' analysis/periodic.py --symbol \"\$sym\" --tf '$TF' --period month --side auto --ohlcv-store '$DATA' <\"\$PULL\" >>'$LOG' 2>&1
     fi

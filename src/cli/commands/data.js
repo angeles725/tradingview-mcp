@@ -11,10 +11,12 @@ register('ohlcv', {
   options: {
     count: { type: 'string', short: 'n', description: 'Number of bars (default 100, max 500)' },
     summary: { type: 'boolean', short: 's', description: 'Return summary stats instead of all bars' },
+    'expect-symbol': { type: 'string', description: 'Refuse bars unless the chart is on this symbol (guards against a feed-not-ready switch race)' },
   },
   handler: (opts) => core.getOhlcv({
     count: opts.count ? Number(opts.count) : undefined,
     summary: opts.summary,
+    expectSymbol: opts['expect-symbol'],
   }),
 });
 
