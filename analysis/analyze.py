@@ -94,6 +94,10 @@ def main():
     ap.add_argument("--conformal", default=None,
                     help="path to a forecast conformal.json; WIDENS the cone bands by "
                          "the learned conformal correction for this symbol/tf/horizon")
+    ap.add_argument("--coverage-scalar", default=None,
+                    help="path to a cone-coverage-scalar.json; rescales EACH cone about "
+                         "its median by the empirical factor k for this symbol/tf so the "
+                         "90%% band's realized coverage climbs back toward nominal")
     args = ap.parse_args()
 
     data = load_bars(sys.stdin)
@@ -229,6 +233,22 @@ def main():
             if applied:
                 report["conformal_applied"] = applied
 
+    # Single-scalar coverage widener: rescale each cone about its median by the
+    # empirical factor k for this symbol/tf (cone_coverage.build_scalar_map), a
+    # lower-DoF alternative to the conformal delta. No entry -> no change (k=1).
+    if args.coverage_scalar and os.path.exists(args.coverage_scalar):
+        try:
+            stbl = json.load(open(args.coverage_scalar))
+        except (ValueError, OSError):
+            stbl = {}
+        sentry = stbl.get(f"{args.symbol}|{args.tf}")
+        k = (sentry or {}).get("k") if isinstance(sentry, dict) else None
+        if k and k != 1.0:
+            import forecast as fc
+            for m, cone in report["monte_carlo"].items():
+                report["monte_carlo"][m] = fc.apply_coverage_scalar(cone, k)
+            report["coverage_scalar_applied"] = {"k": k, "n": (sentry or {}).get("n")}
+
     if args.json:
         print(json.dumps(report, indent=2))
         return
@@ -301,6 +321,10 @@ def _print_human(r):
             print(_w)
     except Exception:
         pass
+    ks = r.get("coverage_scalar_applied")
+    if ks and ks.get("k"):
+        print(f"  [i] COBERTURA-K: cone reescalada x{ks['k']:.2f} (empirica hacia "
+              f"90% real, n={ks.get('n')}).")
     rc = r.get("realized_coverage")
     if rc and "bootstrap" in rc:
         b = rc["bootstrap"]

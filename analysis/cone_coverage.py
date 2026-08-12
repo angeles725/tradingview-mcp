@@ -75,6 +75,39 @@ def build_coverage_map(records: list) -> dict:
     return out
 
 
+DEFAULT_SCALAR_MAP = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "..", "corpus", "cone-coverage-scalar.json")
+
+
+def load_scalar_map(path: str = DEFAULT_SCALAR_MAP) -> dict:
+    """Load the per symbol|tf scalar widening map (absent => empty => no rescale)."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def build_scalar_map(records: list, min_n: int = 20) -> dict:
+    """Per 'symbol|tf' single-scalar widening factor k (fit on REF_MODEL's 90%
+    band), from scored cone backfill records. Groups below `min_n` are omitted so
+    a thin tail can never mint a factor. Mirrors build_coverage_map's grouping."""
+    records = fc._dedupe(records)
+    groups: dict = {}
+    for r in records:
+        if not r.get("realized"):
+            continue
+        groups.setdefault(f"{r.get('symbol')}|{r.get('tf')}", []).append(r)
+    out = {}
+    for key, recs in groups.items():
+        k = fc.coverage_scalar_fit(recs, REF_MODEL, "90", min_n=min_n)
+        if k is None:
+            continue
+        n = sum(1 for r in recs if r.get("realized") and REF_MODEL in r.get("cones", {}))
+        out[key] = {"k": round(k, 4), "n": n}
+    return out
+
+
 def coverage_verdict(symbol: str, tf: str, cmap: dict) -> dict | None:
     """Look up the verdict for a live cone. None if unknown (no warning shown)."""
     return (cmap or {}).get(f"{symbol}|{tf}")

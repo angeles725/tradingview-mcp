@@ -504,6 +504,108 @@ def apply_conformal_widening(cone: dict, delta90_frac: float, delta50_frac: floa
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Single-scalar coverage widener — a lower-degrees-of-freedom alternative to the
+# conformal delta. Split-conformal (per band, per side) over-fits at these sample
+# sizes (validated OOS, B20/B22). This trades those knobs for ONE multiplicative
+# factor k per group: rescale the WHOLE cone about its median so the realized 90%
+# coverage climbs back toward nominal. Fewer knobs -> harder to over-fit; the
+# walk-forward check (coverage_scalar_validate) is the honesty gate before shipping.
+# --------------------------------------------------------------------------- #
+_SCALAR_K_MIN, _SCALAR_K_MAX = 0.5, 3.0
+
+
+def apply_coverage_scalar(cone: dict, k: float) -> dict:
+    """Return a copy of a cone rescaled MULTIPLICATIVELY about its median by factor
+    k, leaving P50 and p_up untouched: each quantile's distance from P50 is scaled
+    by k (k>1 widens, k<1 tightens). Re-sorts the five quantiles so the band stays
+    monotone. k=1 is the identity."""
+    med = float(cone["P50"])
+    vals = sorted([
+        med + k * (float(cone["P5"]) - med),
+        med + k * (float(cone["P25"]) - med),
+        med,
+        med + k * (float(cone["P75"]) - med),
+        med + k * (float(cone["P95"]) - med),
+    ])
+    out = dict(cone)
+    out["P5"], out["P25"], out["P50"], out["P75"], out["P95"] = (float(v) for v in vals)
+    return out
+
+
+def _scalar_residuals(records: list, model: str, band: str) -> list:
+    """Per-side normalized residuals u_i = |y - P50| / (nominal half-width on the
+    side y fell). u=1 means the realized close landed exactly on the nominal band
+    edge; the `level`-quantile of u is the factor that would have made the band
+    cover `level` of the sample. Rows with a zero/negative half-width are skipped."""
+    lo_k, hi_k, _ = _BAND_SPEC[band]
+    us = []
+    for r in records:
+        if not r.get("realized") or model not in r.get("cones", {}) or not r.get("S0"):
+            continue
+        c = r["cones"][model]
+        med = float(c["P50"])
+        y = float(r["realized"]["close"])
+        if y >= med:
+            half = float(c[hi_k]) - med
+        else:
+            half = med - float(c[lo_k])
+        if half > 0:
+            us.append(abs(y - med) / half)
+    return us
+
+
+def coverage_scalar_fit(records: list, model: str = "gaussian", band: str = "90",
+                        min_n: int = 20) -> float | None:
+    """The single multiplicative factor k that rescales `model`'s cone so its
+    `band` covers its nominal level in-sample: the split-conformal order statistic
+    (conformal_delta) of the per-side normalized residuals. Clamped to
+    [_SCALAR_K_MIN, _SCALAR_K_MAX]. Returns None below `min_n` scored rows."""
+    rows = [r for r in records
+            if r.get("realized") and model in r.get("cones", {}) and r.get("S0")]
+    if len(rows) < min_n:
+        return None
+    _, _, level = _BAND_SPEC[band]
+    us = _scalar_residuals(rows, model, band)
+    if len(us) < min_n:
+        return None
+    k = conformal_delta(us, level)
+    return min(_SCALAR_K_MAX, max(_SCALAR_K_MIN, k))
+
+
+def coverage_scalar_validate(records: list, model: str = "gaussian", band: str = "90",
+                             train_frac: float = 0.7, min_n: int = 20) -> dict | None:
+    """Walk-forward (out-of-sample) check of the scalar widener: fit k on the FIRST
+    `train_frac` of the records (by made_at) and MEASURE the `band`'s coverage on
+    the held-out remainder, raw vs k-scaled. Tells you whether the correction
+    GENERALIZES. Returns None below `min_n` scored rows or an empty split."""
+    lo_k, hi_k, level = _BAND_SPEC[band]
+    rows = [r for r in records
+            if r.get("realized") and model in r.get("cones", {}) and r.get("S0")]
+    rows.sort(key=lambda r: r.get("made_at_unix", 0))
+    if len(rows) < min_n:
+        return None
+    cut = int(len(rows) * train_frac)
+    train, test = rows[:cut], rows[cut:]
+    if not train or not test:
+        return None
+    us = _scalar_residuals(train, model, band)
+    if not us:
+        return None
+    k = min(_SCALAR_K_MAX, max(_SCALAR_K_MIN, conformal_delta(us, level)))
+
+    def covered(r, factor):
+        c = apply_coverage_scalar(r["cones"][model], factor)
+        y = float(r["realized"]["close"])
+        return float(c[lo_k]) <= y <= float(c[hi_k])
+
+    n = len(test)
+    cov_raw = sum(covered(r, 1.0) for r in test) / n
+    cov_adj = sum(covered(r, k) for r in test) / n
+    return {"n_train": len(train), "n_test": n, "level": level, "k": k,
+            "cover_raw_test": cov_raw, "cover_adj_test": cov_adj}
+
+
 def conformal_report(records: list, min_n: int = 8, adaptive: bool = False) -> dict:
     """Per 'symbol|tf|horizon' -> per model -> per band conformal correction, over
     groups with at least `min_n` scored records (tail calibration is unreliable
