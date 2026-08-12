@@ -15,6 +15,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT" || exit 1
 
+# Hold the shared chart lock for our whole run so the collect-hook cedes the live
+# chart instead of cycling symbols under us (fd 9 stays open until this exits).
+mkdir -p "$PROJECT/analysis/data" 2>/dev/null || true
+exec 9>"$PROJECT/analysis/data/.chart.lock" 2>/dev/null && flock 9 2>/dev/null || true
+
 SYMBOL="${1:-OANDA:XAUUSD}"
 TFS="${TFS:-M W D 60 15 1}"
 BARS="${BARS:-500}"

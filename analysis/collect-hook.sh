@@ -85,17 +85,30 @@ nohup bash -c "
   syms=($SYMS)
   primary=\${syms[0]}
   multi=0; [ \${#syms[@]} -gt 1 ] && multi=1
-  for sym in \"\${syms[@]}\"; do
-    # switch the chart only when accumulating >1 symbol; let it settle before pull
-    if [ \$multi -eq 1 ]; then '$NODE' src/cli/index.js symbol \"\$sym\" >>'$LOG' 2>&1; sleep 3; fi
-    PULL=\$(mktemp)
-    '$NODE' src/cli/index.js ohlcv --count 300 --expect-symbol \"\$sym\" >\"\$PULL\" 2>>'$LOG'
-    # (a) accumulate history  (b) record a next-hour forecast
-    '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
-    '$PY' analysis/analyze.py --symbol \"\$sym\" --tf '$TF' --horizon '$HORIZON' --conformal '$CONF' --json <\"\$PULL\" 2>>'$LOG' \
-      | '$PY' analysis/forecast.py record --store '$DATA' >>'$LOG' 2>&1
-    rm -f \"\$PULL\"
-  done
+  # Coordinate the live chart with manual tools (snapshot.sh / direction*.sh):
+  # take the shared lock before cycling symbols. If a manual tool holds it, CEDE
+  # the chart this tick and fall through to store-only scoring below (no chart
+  # needed) — so the hook never fights the user's foreground pulls (the race that
+  # --expect-symbol only guarded against, never prevented).
+  exec 9>'$DATA/.chart.lock'
+  if flock -w 8 9; then
+    for sym in \"\${syms[@]}\"; do
+      # switch the chart only when accumulating >1 symbol; let it settle before pull
+      if [ \$multi -eq 1 ]; then '$NODE' src/cli/index.js symbol \"\$sym\" >>'$LOG' 2>&1; sleep 3; fi
+      PULL=\$(mktemp)
+      '$NODE' src/cli/index.js ohlcv --count 300 --expect-symbol \"\$sym\" >\"\$PULL\" 2>>'$LOG'
+      # (a) accumulate history  (b) record a next-hour forecast
+      '$PY' analysis/collect.py --symbol \"\$sym\" --tf '$TF' <\"\$PULL\" >>'$LOG' 2>&1
+      '$PY' analysis/analyze.py --symbol \"\$sym\" --tf '$TF' --horizon '$HORIZON' --conformal '$CONF' --json <\"\$PULL\" 2>>'$LOG' \
+        | '$PY' analysis/forecast.py record --store '$DATA' >>'$LOG' 2>&1
+      rm -f \"\$PULL\"
+    done
+    # restore the primary chart while we still hold the lock, then release it
+    [ \$multi -eq 1 ] && '$NODE' src/cli/index.js symbol \"\$primary\" >>'$LOG' 2>&1
+    flock -u 9
+  else
+    echo \"[\$(date '+%F %T')] collect: chart lock held by a manual tool, skip cycle (score-only tick)\" >>'$LOG'
+  fi
   # (c) score ALL matured forecasts in ONE symbol-correct pass: each record is
   # matched against ITS OWN symbol/tf store, so a multi-symbol log never scores
   # one symbol against another's bars, and off-live-window forecasts still score.
@@ -111,8 +124,6 @@ nohup bash -c "
     '$PY' analysis/backfill.py --store '$DATA' --symbols \"\$bfsyms\" --tf '$TF' --horizon '$HORIZON' --warmup 60 --reset >>'$LOG' 2>&1
   fi
   '$PY' analysis/forecast.py conformal --conformal-out '$CONF' --extra-log '$BACKFILL' >>'$LOG' 2>&1
-  # restore the primary chart if we cycled symbols
-  [ \$multi -eq 1 ] && '$NODE' src/cli/index.js symbol \"\$primary\" >>'$LOG' 2>&1
   echo \"[\$(date '+%F %T')] collect+forecast tick done (\${#syms[@]} sym)\" >>'$LOG'
 " >/dev/null 2>&1 &
 
