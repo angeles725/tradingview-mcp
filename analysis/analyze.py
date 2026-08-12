@@ -292,6 +292,15 @@ def _print_human(r):
               f"{m['P75']:>10.2f}{m['P95']:>10.2f}{m['p_up']:>8.2f}")
     print("  -> deliver the BAND (e.g. 90% inside P5..P95), never the median.")
     print("  -> if bootstrap/t P5..P95 is WIDER than gaussian, tails are fat: size down.")
+    # Per-instrument coverage flag: warn when THIS symbol/tf cone is known to be
+    # too tight/wide (cone_coverage.py), so a stop is not sized off a lying band.
+    try:
+        import cone_coverage as _cc
+        _w = _cc.warning_line(r["symbol"], str(r["timeframe"]), _cc.load_map())
+        if _w:
+            print(_w)
+    except Exception:
+        pass
     rc = r.get("realized_coverage")
     if rc and "bootstrap" in rc:
         b = rc["bootstrap"]
