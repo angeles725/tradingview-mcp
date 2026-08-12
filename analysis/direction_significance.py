@@ -97,6 +97,31 @@ def skill_test(records: list, min_conf: float | None = None,
     }
 
 
+def build_skill_map(rows: list, n_boot: int = 5000) -> dict:
+    """Per-TF skill verdict, for direction.py to stamp on its output so the honest
+    'this does not predict' caveat is DATA (re-testable), not prose."""
+    by_tf = defaultdict(list)
+    for r in rows:
+        by_tf[str(r.get("tf"))].append(r)
+    out = {}
+    for tf, recs in by_tf.items():
+        res = skill_test(recs, n_boot=n_boot)
+        if res.get("insufficient"):
+            out[tf] = {"verdict": "insufficient", "n": res["n"]}
+            continue
+        lo, hi = res["skill_ci95"]
+        if lo > 0 and res["p_permutation"] < 0.05:
+            v = "skill"
+        elif hi < 0:
+            v = "negative"
+        else:
+            v = "no-skill"
+        out[tf] = {"verdict": v, "skill": res["skill"], "ci": res["skill_ci95"],
+                   "p": res["p_permutation"], "n": res["n"],
+                   "hit": res["hit_rate"], "benchmark": res["benchmark"]}
+    return out
+
+
 def _fmt(tf: str, res: dict, tag: str = "") -> str:
     if res.get("insufficient"):
         return f"  {tf}{tag}: n={res['n']} — muestra insuficiente (<20)"
@@ -116,6 +141,8 @@ def main():
     ap.add_argument("--tf", default=None, help="single TF; default = all TFs")
     ap.add_argument("--min-conf", type=float, default=None)
     ap.add_argument("--n-boot", type=int, default=5000)
+    ap.add_argument("--out", default=None,
+                    help="write the per-TF skill verdict map (for direction.py)")
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in open(args.data) if l.strip()]
@@ -123,6 +150,14 @@ def main():
     for r in rows:
         by_tf[str(r.get("tf"))].append(r)
     tfs = [args.tf] if args.tf else sorted(by_tf.keys())
+
+    if args.out:
+        smap = build_skill_map(rows, n_boot=args.n_boot)
+        smap["_note"] = ("per-TF directional skill vs base rate; verdict in "
+                         "{skill, no-skill, negative, insufficient}. Proven on a "
+                         "12-symbol pool: no TF predicts.")
+        with open(args.out, "w") as f:
+            json.dump(smap, f, indent=2)
 
     print("=== TEST DE SIGNIFICANCIA DEL SKILL DIRECCIONAL ===")
     print("  benchmark = mejor predictor CONSTANTE (siempre la clase mayoritaria)")

@@ -236,9 +236,28 @@ def aggregate(records: list) -> dict:
     }
 
 
+DEFAULT_SKILLMAP = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "corpus", "direction-skill.json")
+
+# Short per-TF skill tag for the table. Proven on a 12-symbol pool that NO TF
+# predicts direction; this stamps that verdict next to each row so the output
+# can never be mistaken for a forecast.
+_SKILL_TAG = {"skill": "edge probado", "no-skill": "sin skill",
+              "negative": "skill NEGATIVO", "insufficient": "s/test"}
+
+
 def load_calmap(path: str = DEFAULT_CALMAP) -> dict:
     """Load the OOS-validated recalibration map (direction_recalibrate.py output).
     Absent map => empty dict => raw confidence is reported unchanged."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def load_skillmap(path: str = DEFAULT_SKILLMAP) -> dict:
+    """Load the per-TF skill verdict (direction_significance.py output)."""
     try:
         with open(path) as f:
             return json.load(f)
@@ -272,9 +291,11 @@ def _fmt_table(records: list, symbol: str) -> str:
     order = {tf: i for i, tf in enumerate(TF_ORDER)}
     recs = sorted(records, key=lambda r: order.get(str(r["tf"]), 99))
     arrow = {"up": "^ up  ", "down": "v down", "flat": "~ flat"}
+    skillmap = load_skillmap()
     out = []
     out.append("=" * 70)
-    out.append(f" SESGO DIRECCIONAL  {symbol}   (honesto: confianza explicita)")
+    out.append(f" ESTADO DIRECCIONAL  {symbol}")
+    out.append(" DESCRIPTIVO — no es una prediccion (skill probado ~0/negativo)")
     out.append("=" * 70)
     have_cal = any(r.get("p_correct") is not None for r in recs)
     pcol = "P.acierto" if have_cal else ""
@@ -287,27 +308,33 @@ def _fmt_table(records: list, symbol: str) -> str:
             note += f" (trend sig R2={cp.get('trend_r2')})"
         else:
             note += f" (R2={cp.get('trend_r2')} no sig)"
+        sk = skillmap.get(str(r["tf"]))
+        if sk:
+            note += f" [{_SKILL_TAG.get(sk.get('verdict'), '?')}]"
         if r["confidence"] < 0.20:
-            note += " -- ruido, ignorar"
+            note += " -- ruido"
         pc = r.get("p_correct")
         pcell = (f"{pc:.0%} hist" if pc is not None else "s/cal") if have_cal else ""
         out.append(f" {TF_LABEL.get(str(r['tf']), str(r['tf'])):<9}"
                    f"{arrow.get(r['bias'],'?'):<8}{r['confidence']:<7.2f}"
                    f"{pcell:<11}{note}")
     ag = aggregate(records)
+    state = {"up": "alcista", "down": "bajista",
+             "flat/mixed": "lateral/mixto"}.get(ag["overall"], ag["overall"])
     out.append(" " + "-" * 66)
-    out.append(f" ALINEACION: {ag['n_up']} alcista / {ag['n_down']} bajista / "
+    out.append(f" ESTRUCTURA: {ag['n_up']} alcista / {ag['n_down']} bajista / "
                f"{ag['n_flat']} plano  |  TFs altos (D/W/M): "
                f"{ag['hi_tf_up']} up / {ag['hi_tf_down']} down")
-    out.append(f" SESGO GENERAL: {ag['overall'].upper()}  (score {ag['agg_score']})")
+    out.append(f" ESTADO ESTRUCTURAL: {state.upper()}  "
+               f"(DESCRIPTIVO, no predice)")
     out.append("=" * 70)
-    out.append(" Recordatorio: esto es un SESGO probabilistico, NO una garantia.")
+    out.append(" QUE ES esto: una foto del ESTADO (tendencia/estructura/regimen).")
+    out.append(" QUE NO ES: una prediccion. Test de significancia (12 simbolos):")
+    out.append(" ningun TF supera la base-rate; 1H y mensual son NEGATIVOS.")
     if have_cal:
-        out.append(" P.acierto = probabilidad historica REAL de acertar (recalibrada")
-        out.append(" OOS sobre 12 simbolos). ~50% = sin edge; la CONF cruda no predice.")
-    out.append(" Los conos (analyze.py) siguen siendo zero-drift. En 1m/15m la")
-    out.append(" confianza es baja a proposito (validado: sin edge intradia).")
-    out.append(" Tu tomas la decision.")
+        out.append(" P.acierto = acierto historico REAL de esa llamada (~50% = volado).")
+    out.append(" USO honesto: dimensiona riesgo con los conos (analyze.py) y usa")
+    out.append(" el estado como CONTEXTO. La direccion la decides tu, no el tool.")
     out.append("=" * 70)
     return "\n".join(out)
 
