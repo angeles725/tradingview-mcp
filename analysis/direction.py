@@ -36,11 +36,22 @@ Usage:
 import argparse
 import json
 import math
+import os
 import sys
 
 import numpy as np
 
 import quant as q
+
+# apply_calibration only needs numpy.interp at inference (no sklearn); import is
+# cheap. If unavailable for any reason, calibration is simply skipped.
+try:
+    from direction_recalibrate import apply_calibration as _apply_cal
+except Exception:
+    _apply_cal = None
+
+DEFAULT_CALMAP = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "corpus", "direction-calibration.json")
 
 # Confidence ceiling per timeframe. Encodes the validated intraday no-edge
 # finding: the shorter the bar, the less a directional read can be trusted, so
@@ -225,6 +236,38 @@ def aggregate(records: list) -> dict:
     }
 
 
+def load_calmap(path: str = DEFAULT_CALMAP) -> dict:
+    """Load the OOS-validated recalibration map (direction_recalibrate.py output).
+    Absent map => empty dict => raw confidence is reported unchanged."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def attach_calibration(rec: dict, calmap: dict) -> dict:
+    """Add the HONEST expected accuracy `p_correct` = P(this call is correct),
+    from the recalibration map. This is NOT the raw strength score: it is what the
+    directional call has historically been worth OOS. `bias`/`confidence` (the raw
+    strength used for the flat/directional decision) are left untouched."""
+    tf = str(rec.get("tf"))
+    m = (calmap or {}).get(tf) or {}
+    method = m.get("method", "none")
+    p = None
+    if method == "marginal":
+        p = m.get("value")
+    elif method == "isotonic" and _apply_cal is not None:
+        p = round(_apply_cal(rec["confidence"], tf, calmap), 3)
+    elif method == "raw":
+        # raw was best OOS yet ~uninformative; the honest expected accuracy is the
+        # base rate of correctness, not the raw score.
+        p = m.get("hit_rate")
+    rec["p_correct"] = p
+    rec["cal_method"] = method
+    return rec
+
+
 def _fmt_table(records: list, symbol: str) -> str:
     order = {tf: i for i, tf in enumerate(TF_ORDER)}
     recs = sorted(records, key=lambda r: order.get(str(r["tf"]), 99))
@@ -233,7 +276,9 @@ def _fmt_table(records: list, symbol: str) -> str:
     out.append("=" * 70)
     out.append(f" SESGO DIRECCIONAL  {symbol}   (honesto: confianza explicita)")
     out.append("=" * 70)
-    out.append(f" {'TF':<9}{'SESGO':<8}{'CONF':<7}NOTA")
+    have_cal = any(r.get("p_correct") is not None for r in recs)
+    pcol = "P.acierto" if have_cal else ""
+    out.append(f" {'TF':<9}{'SESGO':<8}{'CONF':<7}{pcol:<11}NOTA")
     out.append(" " + "-" * 66)
     for r in recs:
         cp = r.get("components", {})
@@ -244,8 +289,11 @@ def _fmt_table(records: list, symbol: str) -> str:
             note += f" (R2={cp.get('trend_r2')} no sig)"
         if r["confidence"] < 0.20:
             note += " -- ruido, ignorar"
+        pc = r.get("p_correct")
+        pcell = (f"{pc:.0%} hist" if pc is not None else "s/cal") if have_cal else ""
         out.append(f" {TF_LABEL.get(str(r['tf']), str(r['tf'])):<9}"
-                   f"{arrow.get(r['bias'],'?'):<8}{r['confidence']:<7.2f}{note}")
+                   f"{arrow.get(r['bias'],'?'):<8}{r['confidence']:<7.2f}"
+                   f"{pcell:<11}{note}")
     ag = aggregate(records)
     out.append(" " + "-" * 66)
     out.append(f" ALINEACION: {ag['n_up']} alcista / {ag['n_down']} bajista / "
@@ -254,6 +302,9 @@ def _fmt_table(records: list, symbol: str) -> str:
     out.append(f" SESGO GENERAL: {ag['overall'].upper()}  (score {ag['agg_score']})")
     out.append("=" * 70)
     out.append(" Recordatorio: esto es un SESGO probabilistico, NO una garantia.")
+    if have_cal:
+        out.append(" P.acierto = probabilidad historica REAL de acertar (recalibrada")
+        out.append(" OOS sobre 12 simbolos). ~50% = sin edge; la CONF cruda no predice.")
     out.append(" Los conos (analyze.py) siguen siendo zero-drift. En 1m/15m la")
     out.append(" confianza es baja a proposito (validado: sin edge intradia).")
     out.append(" Tu tomas la decision.")
@@ -274,6 +325,8 @@ def main():
     ap.add_argument("--human", action="store_true", help="bias mode: human line")
     args = ap.parse_args()
 
+    calmap = load_calmap()
+
     if args.mode == "aggregate":
         records = []
         symbol = args.symbol
@@ -282,6 +335,7 @@ def main():
             if not line:
                 continue
             r = json.loads(line)
+            attach_calibration(r, calmap)
             records.append(r)
             symbol = symbol or r.get("symbol", "")
         if not records:
@@ -294,6 +348,7 @@ def main():
     rec = bias_from_bars(data["open"], data["high"], data["low"],
                          data["close"], data["volume"], data["time"], args.tf)
     rec["symbol"] = args.symbol
+    attach_calibration(rec, calmap)
     if args.human:
         cp = rec["components"]
         print(f"{args.symbol} {args.tf}: {rec['bias'].upper()} "
