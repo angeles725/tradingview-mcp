@@ -1,0 +1,67 @@
+{
+  "15": {
+    "verdict": "no-skill",
+    "skill": 0.0,
+    "ci": [
+      -0.44,
+      0.0
+    ],
+    "p": 1.0,
+    "n": 84,
+    "hit": 0.5714,
+    "benchmark": 0.5714
+  },
+  "D": {
+    "verdict": "no-skill",
+    "skill": -0.0036,
+    "ci": [
+      -0.0618,
+      0.0314
+    ],
+    "p": 0.3845,
+    "n": 279,
+    "hit": 0.5269,
+    "benchmark": 0.5305
+  },
+  "W": {
+    "verdict": "no-skill",
+    "skill": -0.0411,
+    "ci": [
+      -0.0988,
+      0.0047
+    ],
+    "p": 0.3339,
+    "n": 438,
+    "hit": 0.5457,
+    "benchmark": 0.5868
+  },
+  "60": {
+    "verdict": "negative",
+    "skill": -0.096,
+    "ci": [
+      -0.1576,
+      -0.0494
+    ],
+    "p": 0.971,
+    "n": 198,
+    "hit": 0.5101,
+    "benchmark": 0.6061
+  },
+  "1": {
+    "verdict": "insufficient",
+    "n": 8
+  },
+  "M": {
+    "verdict": "negative",
+    "skill": -0.0364,
+    "ci": [
+      -0.065,
+      -0.0141
+    ],
+    "p": 0.2676,
+    "n": 549,
+    "hit": 0.5556,
+    "benchmark": 0.592
+  },
+  "_note": "per-TF directional skill vs base rate; verdict in {skill, no-skill, negative, insufficient}. Proven on a 12-symbol pool: no TF predicts."
+}

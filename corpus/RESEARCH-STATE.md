@@ -4,9 +4,9 @@
 
 <!-- research-state.v1 -->
 schema: research-state.v1
-covered_blocks: 27
-gaps_closed: 27
-known_gaps: 27
+covered_blocks: 33
+gaps_closed: 33
+known_gaps: 33
 investigable_open: 0
 requires_execution_open: 0
 blocked_open: 0
@@ -20,12 +20,15 @@ Two focuses share this corpus. Capability-hardening blocks use the `tradingview-
 indexed in [INDEX.md](INDEX.md); the trading analysis and decision-methodology blocks use the
 `tvdecision-` prefix and are indexed in [INDEX-DECISIONS.md](INDEX-DECISIONS.md).
 
-- **Covered blocks**: 27 (capability-hardening B1..B3 + tvdecision B1..B24)
-- **Coverage metric**: 27 / 27 outline items captured
-- **Last iteration**: 2026-08-10 - calibration integrity: contamination guard, target-dedup, pooled cov50 illusion (tvdecision B21)
-- **Last iteration**: 2026-08-11 - ACI adaptive conformal wired, walk-forward tested, REJECTED OOS (tvdecision B22)
-- **Last iteration**: 2026-08-11 - record-side contamination guard + threshold tightening (tvdecision B23)
+- **Covered blocks**: 33 (capability-hardening B1..B3 + tvdecision B1..B30)
+- **Coverage metric**: 33 / 33 outline items captured
 - **Last iteration**: 2026-08-11 - store contamination: source-level --expect-symbol guard + mass cleanup (tvdecision B24)
+- **Last iteration**: 2026-08-12 - multi-TF directional bias tool: descriptive up/down/flat + confidence (tvdecision B25)
+- **Last iteration**: 2026-08-12 - directional bias is a base-rate mirage: significance + recalibration, no skill at any TF (tvdecision B26)
+- **Last iteration**: 2026-08-12 - orthogonal edge hunt: COT positioning probe, still no edge (tvdecision B27)
+- **Last iteration**: 2026-08-12 - per-instrument cone coverage flag: warn when a band lies (tvdecision B28)
+- **Last iteration**: 2026-08-12 - lock-coordinated calibration refresh pipeline + flock chart coordination (tvdecision B29)
+- **Last iteration**: 2026-08-12 - coverage-scalar cone widener: walk-forward REJECTED OOS, kept dormant (tvdecision B30)
 
 ## Document outline
 
@@ -67,6 +70,12 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | high | ACI adaptive conformal: wired, walk-forward tested, rejected out-of-sample | `analysis/forecast.py` + walk-forward | captured - tvB22 |
 | high | Record-side contamination guard + the threshold that was too loose | `analysis/forecast.py` + `analysis/periodic.py` + live measurement | captured - tvB23 |
 | high | Store contamination: source-level --expect-symbol guard + mass cleanup | `src/core/data.js` + hooks + live measurement | captured - tvB24 |
+| high | Multi-timeframe directional bias: honest up/down/flat + confidence tool | `analysis/direction.py` + `analysis/direction.sh` + live run | captured - tvB25 |
+| high | Directional bias is a base-rate mirage: significance + OOS recalibration | `analysis/direction_significance.py` + `analysis/direction_recalibrate.py` + measurement | captured - tvB26 |
+| high | Orthogonal edge hunt: COT positioning probe, still no edge | `analysis/cot_probe.py` + live+remote measurement | captured - tvB27 |
+| high | Per-instrument cone coverage flag: warn when a band lies (diagnostic, not correction) | `analysis/cone_coverage.py` + `analysis/analyze.py` + measurement | captured - tvB28 |
+| high | Lock-coordinated calibration refresh pipeline + flock chart coordination | `analysis/refresh-calibration.sh` + hooks | captured - tvB29 |
+| high | Coverage-scalar cone widener: walk-forward REJECTED out-of-sample | `analysis/forecast.py` + `analysis/cone_coverage.py` + walk-forward gate | captured - tvB30 |
 
 ## Iteration history
 
@@ -97,6 +106,14 @@ Trading analysis and decision methodology (distinct topic; indexed in
 | 23 | 2026-08-10 | tvdecision: walk-forward rigor (conformal 50%-band over-fits OOS) | tvB20 | no / inline (TDD + backfill walk-forward) | 0 |
 | 24 | 2026-08-10 | tvdecision: calibration integrity (contamination guard, target-dedup, pooled cov50 illusion) | tvB21 | no / inline (TDD + live measurement) | 1 (backlog #21: independent-subset cov50 CI) |
 | 25 | 2026-08-11 | tvdecision: ACI adaptive conformal wired + rejected on walk-forward | tvB22 | no / inline (TDD + walk-forward OOS) | 0 |
+| 26 | 2026-08-11 | tvdecision: record-side contamination guard + threshold tightening | tvB23 | no / inline (live measurement) | 0 |
+| 27 | 2026-08-11 | tvdecision: store contamination (source --expect-symbol guard + cleanup) | tvB24 | no / inline (live measurement) | 0 |
+| 28 | 2026-08-12 | tvdecision: multi-TF directional bias tool (descriptive + confidence) | tvB25 | no / per-section-agent (source cites + live gold run) | 0 |
+| 29 | 2026-08-12 | tvdecision: directional bias is a base-rate mirage (significance + recalibration) | tvB26 | no / per-section-agent (reproduced significance + recalibration) | 0 |
+| 30 | 2026-08-12 | tvdecision: orthogonal edge hunt (COT positioning probe, no edge) | tvB27 | no / per-section-agent (live+remote COT probe) | 0 |
+| 31 | 2026-08-12 | tvdecision: per-instrument cone coverage flag (warn when a band lies) | tvB28 | no / per-section-agent (coverage map + live cone) | 0 |
+| 32 | 2026-08-12 | tvdecision: lock-coordinated calibration refresh pipeline + flock coordination | tvB29 | no / per-section-agent (source cites) | 0 |
+| 33 | 2026-08-12 | tvdecision: coverage-scalar cone widener REJECTED OOS (kept dormant) | tvB30 | no / per-section-agent (TDD build + walk-forward gate) | 0 |
 
 ## Blocked gaps
 

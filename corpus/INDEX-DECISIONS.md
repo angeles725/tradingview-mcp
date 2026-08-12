@@ -78,8 +78,14 @@ deduction.
 - [x] ACI adaptive conformal: wired, walk-forward tested, REJECTED out-of-sample -> [Block 22]
 - [x] Record-side contamination guard + the threshold that was too loose -> [Block 23]
 - [x] Store contamination: source-level --expect-symbol guard + mass cleanup -> [Block 24]
+- [x] Multi-timeframe directional bias: an honest up/down/flat + confidence tool -> [Block 25]
+- [x] Directional bias is a base-rate mirage: significance + OOS recalibration, no skill at any TF -> [Block 26]
+- [x] Hunting orthogonal edge: the COT positioning probe finds none either -> [Block 27]
+- [x] Per-instrument cone coverage flag: warn when a band lies (diagnostic, not correction) -> [Block 28]
+- [x] Lock-coordinated calibration refresh: one command, no chart race -> [Block 29]
+- [x] Coverage-scalar cone widener: walk-forward REJECTED out-of-sample -> [Block 30]
 
 ## Coverage
 
-- **Document outline (tvdecision focus)**: 24 / 24 items captured
+- **Document outline (tvdecision focus)**: 30 / 30 items captured
 - **Discovery backlog**: not applicable (`method: document-cycle`)

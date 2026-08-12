@@ -56,10 +56,26 @@ It reports OLS+CI+Theil-Sen trend, five volatility estimators (incl. EWMA/GARCH)
 Carlo cone (gaussian/bootstrap/Student-t, so fat tails are visible), and conditional P(next up) with Wilson
 CIs + a binomial test. A lookahead-leakage guard (`analysis/test_analyze.py`) blocks fake 100% edges.
 
+**Directional state (descriptive, NOT predictive)** - [Block 25](tvdecision-block25.md) /
+[Block 26](tvdecision-block26.md): `bash analysis/direction.sh OANDA:XAUUSD` reads a multi-timeframe
+up/down/flat state with explicit confidence across 1m..1M. Read it as CONTEXT (trend/regime), never as a
+forecast: a pooled significance test proved directional skill is ZERO or NEGATIVE at every timeframe
+(no TF beats the base-rate best-constant predictor), and an orthogonal COT positioning probe found no edge
+either. The tool stamps each call with its real historical hit-rate for exactly this reason.
+
+**Cone coverage caveat** - [Block 28](tvdecision-block28.md): before sizing a stop off a cone band, check
+the per-instrument coverage flag (`analysis/cone_coverage.py`, `corpus/cone-coverage.json`). Some symbol|tf
+cones run too tight - notably gold/silver at D/W, whose nominal 90% band historically held only ~79-85%.
+`analyze.py` prints the warning inline; widen the stop where the flag says the band lies. This stays a
+diagnostic FLAG on purpose: every attempt to auto-widen it (conformal 50%-band, ACI, block-bootstrap,
+vol-floor, and the single-scalar widener in [Block 30](tvdecision-block30.md)) over-fit out-of-sample.
+
 ## 4. Decision guardrails (non-negotiable)
 
 - Deliver a **range with a probability**, never a single point price.
-- **No method here reliably predicts direction** - trend/RSI/GARCH refine size and confidence, not the arrow.
+- **Direction is not forecastable here** - proven, not assumed: zero/negative skill at every timeframe
+  ([Block 26](tvdecision-block26.md)), and orthogonal data (COT) adds none ([Block 27](tvdecision-block27.md)).
+  Trend/RSI/GARCH refine size and confidence, never the arrow.
 - **Validate any rule by an honest backtest** (costs + enough trades) BEFORE risking real money.
 - **Risk management first**: position sizing and stop-loss decide survival, not a better predictor.
 - **The tool cannot prove broker/demo isolation** - confirm the live broker is disconnected out of band before any practice.
